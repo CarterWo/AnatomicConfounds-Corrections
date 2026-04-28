@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Test cache
+.pytest_cache/
+
+# Build artifacts
+dist/
+*.egg-info/
+*.whl
+*.tar.gz
+
+# Windows shortcuts
+*.lnk
+
+# Large data files
+*.mtx
+*.h5ad
+*.h5
+*.hdf5

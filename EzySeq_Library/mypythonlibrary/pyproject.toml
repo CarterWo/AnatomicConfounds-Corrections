@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mypythonlibrary"
+version = "0.1.0"
+description = "A python library for Single Cell Transcriptomics analysis. (src layout)"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name="Carter Woods"}]
+requires-python = ">=3.10"
+dependencies = [
+      "anndata>=0.10",
+  "scanpy>=1.9",
+  "squidpy>=1.4",
+  "numpy",
+  "pandas",
+  "scipy",
+  "matplotlib",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "build>=1", "twine>=5"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]

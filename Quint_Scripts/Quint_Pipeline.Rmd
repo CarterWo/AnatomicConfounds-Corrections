@@ -1,0 +1,851 @@
+---
+title: "CressExpression"
+output: html_document
+date: "2025-11-17"
+---
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+library(Seurat)
+library("CrossExpression")
+library(Matrix)
+library(readxl)
+```
+
+
+
+
+#Seurat Creating
+```{r}
+make_cfg <- function(root_dir,
+                     seurat_rds_name = "seurat_object.rds",
+                     raw_counts_name = "raw_counts.csv",
+                     logged_counts_name = "normalized_counts.csv",
+                     features_name   = "features_counts.csv",
+                     metadata_name   = "cell_metadata.csv",
+                     coords_name     = "coords_xy.csv",
+                     quint_labels_name = "Color_key.xlsm") {
+  #root_dir <- normalizePath(root_dir, winslash = "/", mustWork = TRUE)
+
+  list(
+    root_dir = root_dir,
+    seurat_rds = file.path(root_dir, seurat_rds_name),
+    raw_counts = file.path(root_dir, raw_counts_name),
+    logged_counts = file.path(root_dir, logged_counts_name),
+    features   = file.path(root_dir, features_name),
+    metadata   = file.path(root_dir, metadata_name),
+    coords     = file.path(root_dir, coords_name),
+    quint_labels = file.path(root_dir, quint_labels_name)
+  )
+}
+
+# -------------------------------
+# Build Seurat from CSVs (cells x genes counts assumed) + add coords
+# -------------------------------
+build_seurat_from_folder <- function(cfg, assay_name = "RNA") {
+  # Read
+  counts   <- read.csv(cfg$raw_counts, row.names = 1, check.names = FALSE)
+  logged_counts   <- read.csv(cfg$logged_counts, row.names = 1, check.names = FALSE)
+  features <- read.csv(cfg$features,   row.names = 1, check.names = FALSE)
+  meta     <- read.csv(cfg$metadata,   row.names = 1, check.names = FALSE)
+  coords   <- read.csv(cfg$coords,     row.names = 1, check.names = FALSE)
+
+  # Align dimnames (your original logic)
+  colnames(counts) <- rownames(features)       # genes
+  rownames(counts) <- rownames(meta)           # cells
+  colnames(logged_counts) <- rownames(features)
+  rownames(logged_counts) <- rownames(meta)
+  # Seurat expects genes x cells
+  counts_seurat <- t(counts)
+  logged_seurat <- t(logged_counts)
+
+  seu <- CreateSeuratObject(
+    counts    = counts_seurat,
+    meta.data = meta,
+    assay     = assay_name
+  )
+  seu <- SetAssayData(seu, layer = "data", new.data = as.matrix(logged_seurat))
+  # Add coords (x,y) as metadata (aligned to cells)
+  coords_subset <- coords[colnames(seu), , drop = FALSE]
+  seu <- AddMetaData(seu, metadata = coords_subset)
+
+  seu
+}
+
+getwd()
+
+
+
+cfg_file<-make_cfg("C:\Users\woods\OneDrive - University of Missouri\General - Lin Brain Lab - Ogrp\Carter Woods\CosMx_Processing\Manuscript\csvs_20g_100t_no00")
+
+#cfg_file<-make_cfg("C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/CosMx_Processing/Probiotics/H5AD_to_rds_UPDATED_THRESH")
+
+seurat_obj<-build_seurat_from_folder(cfg_file)
+```
+#rds to h5ad
+```{r}
+# Metadata (obs in AnnData)
+meta <- seurat_obj@meta.data   # or seurat_obj[[]]
+
+write.csv(
+  meta,
+  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/metadata.csv",
+
+  row.names = TRUE  # keep cell barcodes as rownames for index
+)
+library(Seurat)
+
+# PCA embeddings (cells × PCs)
+pca_mat <- Embeddings(seurat_obj, "pca")
+write.csv(
+  pca_mat,
+  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/pca.csv",
+
+  row.names = TRUE
+)
+
+# UMAP embeddings (cells × 2)
+umap_mat <- Embeddings(seurat_obj, "umap")
+write.csv(
+  umap_mat,
+  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/umap.csv",
+
+  row.names = TRUE
+)
+
+# Repeat for other reductions if needed, e.g. t-SNE:
+# tsne_mat <- Embeddings(seurat_obj, "tsne")
+# write.csv(tsne_mat, "tsne.csv", quote = FALSE, row.names = TRUE)
+
+```
+
+
+```{r}
+
+
+LMM_r_sub=read.csv(
+  "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/WB_Residuals/residuals_full_jregion.csv"
+)
+
+LMM_r=read.csv(
+  "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/WB_Residuals/residuals_full.csv"
+)
+var_xplained<-c('r2_group',	'r2_napari_region',	'r2_cell_type')
+
+df_with_largest <- LMM_r %>%
+  rowwise() %>%
+  mutate(
+    largest = var_xplained[
+      which.max(c_across(all_of(var_xplained)))
+    ]
+  ) %>%
+  ungroup()
+
+# count summary (original behavior)
+df_counts <- df_with_largest %>% count(largest)
+
+# gene names for each category
+df_genes <- df_with_largest %>%
+  group_by(largest) %>%
+  summarise(genes = list(gene))
+
+# ---- SUBSET MODEL ----
+var_xplained <- c("r2_group","r2_napari_region")
+
+df_with_largest_sub <- LMM_r_sub %>%
+  rowwise() %>%
+  mutate(
+    largest = var_xplained[
+      which.max(c_across(all_of(var_xplained)))
+    ]
+  ) %>%
+  ungroup()
+
+df_counts_sub <- df_with_largest_sub %>% count(largest)
+
+df_genes_sub <- df_with_largest_sub %>%
+  group_by(largest) %>%
+  summarise(genes = list(gene))
+
+# print outputs
+df_counts
+df_genes
+df_counts_sub
+df_genes_sub
+
+genes_df <- df_genes$genes[[3]]
+write.csv(genes_df, "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/WB_Residuals/anatomically_driven_genes.csv", row.names = FALSE)
+```
+
+
+
+#transforming for QUINT
+```{r}
+
+
+cluster_name<-'Run0_Neighborhood.Analysis.1_1_assignments'
+sample_vec <- unique(seurat_obj$sample_ID)
+out_dir <- paste0("C:/Users/woods/OneDrive/Documents/Quint/Images/Probiotics")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+for (i in seq_along(sample_vec)) {
+
+  seurat_s <- subset(seurat_obj, subset = sample_ID == sample_vec[i])
+
+  # 2) Pull coordinates + cluster metadata
+  df_plot <- FetchData(
+    seurat_s,
+    vars = c("x", "y", cluster_name)
+  )
+  colnames(df_plot) <- c("y", "x", 'Cluster_ID')
+  df_plot$Cluster_ID <- as.factor(df_plot$Cluster_ID)
+  
+  # 3) Compute coordinate bounds (for affine mapping)
+  x_min <- min(df_plot$x)
+  x_max <- max(df_plot$x)
+  y_min <- min(df_plot$y)
+  y_max <- max(df_plot$y)
+
+  # 4) Define image size for QuickNII (pixels via width/height & dpi)
+  dpi_val <- 300
+
+  x_range <- x_max - x_min
+  y_range <- y_max - y_min
+  aspect_data <- x_range / y_range  # width/height
+
+  base_height_in <- 5
+  base_width_in  <- base_height_in * aspect_data
+
+  img_width_in  <- base_width_in
+  img_height_in <- base_height_in
+
+  # 5) Build pseudo-histology plot (clusters as color)
+###################################################################################
+  p1 <- ggplot(df_plot, aes(x = x, y = y)) +
+    geom_point(aes(color = Cluster_ID), size = 0.001, alpha = 0.6) +
+    scale_x_reverse() +
+    coord_fixed(
+      xlim = c(x_min, x_max),
+      ylim = c(y_min, y_max),
+      expand = FALSE
+    ) +
+    theme_void() +  # no axes, no grid
+  theme(
+        # FIXED: Explicitly set margins to 0 to remove white/black space edges
+        plot.margin = margin(0, 0, 0, 0, "cm"), 
+        panel.spacing = unit(0, "lines"),
+        
+        panel.background = element_rect(fill = "black", color = NA),
+        plot.background  = element_rect(fill = "black", color = NA),
+        legend.position  = "none"
+      )
+###################################################################################
+  
+  p_seg <- ggplot(df_plot, aes(x = x, y = y)) +
+    scale_x_reverse() +
+    geom_point(color = "black", size = 0.001, alpha = 1) +
+    coord_fixed(
+      xlim = c(x_min, x_max),
+      ylim = c(y_min, y_max),
+      expand = FALSE
+    ) +
+    theme_void() +
+    theme(
+          # FIXED: Explicitly set margins to 0 to remove white/black space edges
+          plot.margin = margin(0, 0, 0, 0, "cm"), 
+          panel.spacing = unit(0, "lines"),
+          
+          panel.background = element_rect(fill = "black", color = NA),
+          plot.background  = element_rect(fill = "black", color = NA),
+          legend.position  = "none"
+        )
+  # 6) Save PNG for QuickNII / VisuAlign
+  out_png <- file.path(out_dir, paste0("pseudo_histology_", sample_vec[i], "_s00",i,".png"))
+  ggsave(
+    filename = out_png,
+    plot     = p1,
+    width    = img_width_in,
+    height   = img_height_in,
+    dpi      = dpi_val,
+    bg       = "black"
+  )
+  
+  out_seg <- file.path(out_dir, paste0("segmentation_cells_", sample_vec[i], "_s00",i,".png"))
+  ggsave(
+    filename = out_seg,
+    plot     = p_seg,
+    width    = img_width_in,
+    height   = img_height_in,
+    dpi      = dpi_val,
+    bg       = "black"
+  )
+
+}
+
+
+
+```
+
+```{r}
+sample_vec
+
+```
+
+#Inverse transforming
+
+```{r}
+library(Seurat)
+library(imager)
+library(dplyr)
+
+# 1. Setup specific to Sample 368R (match your loop variables)
+#sample_vec <- unique(seurat_obj$sample_ID)
+sample_vec <- c("120L","323DY","118B","1182L","368R","217R", "144_2L", "367R","215L")
+color_codes <- list()
+plots <- list()
+for (i in seq_along(sample_vec)){
+  fp <- paste0("C:/Users/woods/OneDrive/Documents/Quint/Images/Combination/Output/Images/368R_trial_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
+  #fp <- paste0("C:/Users/woods/OneDrive/Documents/Quint/Images/Probiotics/Output/Images/Probiotics_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
+  message(fp)
+  message(sample_vec[[i]])
+  atlas_img <- load.image(fp)
+  seurat_s <- subset(seurat_obj, subset = sample_ID == sample_vec[[i]])
+  # Get image dimensions
+  img_w <- width(atlas_img)
+  img_h <- height(atlas_img)
+  print(img_w)
+  print(img_h)
+  # 4. Fetch Coordinates from Seurat
+  
+  df_plot_pixels <- FetchData(
+      seurat_s,
+      vars = c("x", "y")
+    )
+  colnames(df_plot_pixels) <- c("y", "x")
+  
+  
+  x_min <- min(df_plot_pixels$x)
+  x_max <- max(df_plot_pixels$x)
+  y_min <- min(df_plot_pixels$y)
+  y_max <- max(df_plot_pixels$y)
+  
+  df_plot_pixels <- df_plot_pixels %>%
+    mutate(
+      # Calculate normalized position (0 to 1)
+      # Note the (x_max - x) for the reverse axis
+      x_norm = (x_max - x) / (x_max - x_min),
+      
+      # Note the (y_max - y) because image origin (0,0) is top-left, plot origin is bottom-left
+      y_norm = (y_max - y) / (y_max - y_min),
+      
+      # Convert to pixel coordinates (1-based for R indexing)
+      # We create a 'px' and 'py' column
+      px = round(x_norm * (img_w-1))+1,
+      py = round(y_norm * (img_h-1))+1
+    )
+
+  
+  pixel_indices <- df_plot_pixels$px + (df_plot_pixels$py) * img_w
+  
+  
+  atlas_arr <- as.array(atlas_img)  # dims: [x, y, z, c]
+  
+  N <- nrow(df_plot_pixels)
+  
+  
+  
+  atlas_arr <- as.array(atlas_img)  # dim: [x, y, 1, 3]
+  N <- nrow(df_plot_pixels)
+  
+  # 1) Build indices: frame is always 1, channel = 1,2,3
+  idx_R <- cbind(df_plot_pixels$px, df_plot_pixels$py, 1L, 1L)
+  idx_G <- cbind(df_plot_pixels$px, df_plot_pixels$py, 1L, 2L)
+  idx_B <- cbind(df_plot_pixels$px, df_plot_pixels$py, 1L, 3L)
+  
+  # 2) Extract and ROUND to nearest integer 0–255
+  r_vals <- round(atlas_arr[idx_R] * 255)
+  g_vals <- round(atlas_arr[idx_G] * 255)
+  b_vals <- round(atlas_arr[idx_B] * 255)
+  
+  df_plot_pixels$R <- r_vals
+  df_plot_pixels$G <- g_vals
+  df_plot_pixels$B <- b_vals
+  
+  # 3) Build the same rgb_key format as labels.txt ("R_G_B")
+  df_plot_pixels$quint_region <- paste(df_plot_pixels$R,
+                                  df_plot_pixels$G,
+                                  df_plot_pixels$B,
+                                  sep = ",")
+
+  
+  p <- ggplot(df_plot_pixels, aes(x =x, y = y)) +
+      geom_point(aes(color = quint_region), size = 0.1, alpha = 0.6) +
+      scale_x_reverse() +
+
+      coord_fixed(
+        xlim = c(x_min, x_max),
+        ylim = c(y_min, y_max),
+        expand = FALSE
+      ) +
+      theme_void() +
+      theme(
+            # FIXED: Explicitly set margins to 0 to remove white/black space edges
+            plot.margin = margin(0, 0, 0, 0, "cm"), 
+            panel.spacing = unit(0, "lines"),
+            
+            panel.background = element_rect(fill = "black", color = NA),
+            plot.background  = element_rect(fill = "black", color = NA),
+            legend.position  = "none"
+          )
+    
+    plots[[i]] <- p
+  
+  color_codes[[sample_vec[[i]]]] <- df_plot_pixels %>% select(quint_region)
+  }
+
+
+all_new_metadata <- do.call(rbind, color_codes)
+
+rownames(all_new_metadata) <- sub("^[^.]*\\.", "", rownames(all_new_metadata))
+
+
+seurat_obj <- AddMetaData(seurat_obj, metadata = all_new_metadata)
+```
+
+```{r}
+# Region names that *are* known from the atlas
+named_labels <- unique(as.character(lut_rgb))
+
+sample_ids <- sort(unique(seurat_obj$sample_ID))
+
+plots_unmatched <- vector("list", length(sample_ids))
+names(plots_unmatched) <- sample_ids
+
+for (i in seq_along(sample_ids)) {
+  s <- sample_ids[i]
+
+  df <- seurat_obj@meta.data %>%
+    filter(sample_ID == s) %>%
+    select(x, y, quint_region)
+
+  # TRUE = this cell's quint_region did *not* match any atlas label
+  df$is_unmatched <- !(df$quint_region %in% named_labels)
+
+  p <- ggplot(df, aes(x = x, y = y)) +
+    # matched regions: grey, no legend
+    geom_point(
+      data = df[!df$is_unmatched, , drop = FALSE],
+      color = "grey30",
+      size  = 0.25,
+      alpha = 0.25
+    ) +
+    # unmatched regions: colored, with legend
+    geom_point(
+      data = df[df$is_unmatched, , drop = FALSE],
+      aes(color = quint_region),
+      size  = 0.4,
+      alpha = 0.9
+    ) #+
+    # scale_color_discrete(name = paste0("Unmatched regions: ",s)) +
+    # guides(color = guide_legend(override.aes = list(size = 2.5))) +
+    # coord_equal() +
+    # ggtitle(paste0("Unmatched atlas entries –", s)) +
+    # theme_void() +
+    # theme(
+    #   plot.background  = element_rect(fill = "white", color = NA),
+    #   panel.background = element_rect(fill = "white", color = NA),
+    #   legend.position  = "right",
+    #   legend.key.size = unit(1.0, "lines"),
+    #   plot.title       = element_text(colour = "white")
+    # )
+
+
+  plots_unmatched[[i]] <- p
+}
+
+# Example: display one sample
+
+plots_unmatched[[1]]
+plots_unmatched[[2]]
+plots_unmatched[[3]]
+plots_unmatched[[4]]
+plots_unmatched[[5]]
+plots_unmatched[[6]]
+plots_unmatched[[7]]
+plots_unmatched[[8]]
+plots_unmatched[[9]]
+# or e.g.: plots_unmatched[["368R"]]
+```
+
+```{r}
+# Region names that *are* known from the atlas
+named_labels <- unique(as.character(lut_rgb))
+
+sample_ids <- sort(unique(seurat_obj$sample_ID))
+
+plots_matched <- vector("list", length(sample_ids))
+names(plots_matched) <- sample_ids
+
+for (i in seq_along(sample_ids)) {
+  s <- sample_ids[i]
+
+  df <- seurat_obj@meta.data %>%
+    dplyr::filter(sample_ID == s) %>%
+    dplyr::select(x, y, quint_region)
+
+  # TRUE = this cell's quint_region *does* match an atlas label
+  df$is_matched <- df$quint_region %in% named_labels
+
+  p <- ggplot(df, aes(x = x, y = y)) +
+    # unmatched regions: grey, no legend
+    geom_point(
+      data  = df[!df$is_matched, , drop = FALSE],
+      color = "grey80",
+      size  = 0.25,
+      alpha = 0.25
+    ) +
+    # matched regions: colored, with legend
+    geom_point(
+      data = df[df$is_matched, , drop = FALSE],
+      aes(color = quint_region),
+      size  = 0.4,
+      alpha = 0.9
+    ) +
+    scale_color_discrete(name = paste0("Matched regions: ", s)) +
+    guides(color = guide_legend(override.aes = list(size = 2.5))) +
+    coord_equal() +
+    ggtitle(paste0("Matched atlas entries – ", s)) +
+    theme_void() +
+    theme(
+      plot.background  = element_rect(fill = "black", color = NA),
+      panel.background = element_rect(fill = "black", color = NA),
+      legend.position  = "none", #Point of legend
+      legend.key.size  = ,unit(1.0, "lines"),
+      plot.title       = element_text(colour = "white")
+    )
+
+  plots_matched[[i]] <- p
+}
+
+# Example: display samples
+plots_matched[[1]]
+plots_matched[[2]]
+plots_matched[[3]]
+plots_matched[[4]]
+plots_matched[[5]]
+plots_matched[[6]]
+plots_matched[[7]]
+plots_matched[[8]]
+plots_matched[[9]]
+# or e.g.: plots_matched[["368R"]]
+
+```
+
+#Region Freq.
+```{r}
+# 1. Create the table
+frequency_table <- table(seurat_obj$quint_region, seurat_obj$sample_ID)
+
+# 2. Sort it by row frequency (Highest to Lowest)
+frequency_table <- frequency_table[order(rowSums(frequency_table), decreasing = TRUE), ]
+
+# 3. Convert to Data Frame (Matrix -> DF)
+frequency_table <- as.data.frame.matrix(frequency_table)
+
+# 4. (Optional) Move the Row Names (Regions) into their own column
+frequency_table$Region <- rownames(frequency_table)
+# Reorder columns so 'Region' is first
+frequency_table <- frequency_table[, c(ncol(frequency_table), 1:(ncol(frequency_table)-1))]
+
+print(frequency_table)
+```
+
+```{r}
+
+# Cntrl Ahift M %>% 
+# Alt + - <- 
+labels_path <- "C:/Users/woods/OneDrive/Documents/Quint/Color_key.xlsm"
+
+labels <- read_excel(
+  labels_path, sheet=1
+
+)
+
+colnames(labels) <- c("R", "G", "B", "macro", "LABEL")
+
+labels$rgb_key <- paste(labels$R, labels$G, labels$B, sep = ",")
+
+# Make a lookup vector: names = rgb_key, values = LABEL
+lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
+```
+
+#Annotating Regions
+```{r}
+
+
+# ==============================================================================
+# Map your pixel colors (df_plot_pixels$atlas_color) to region names
+# ==============================================================================
+
+
+labels_path <- "C:/Users/woods/OneDrive/Documents/Quint/Color_key.xlsm"
+
+labels <- read_excel(
+  labels_path, sheet=1
+
+)
+
+colnames(labels) <- c("R", "G", "B", "macro", "LABEL")
+
+labels$rgb_key <- paste(labels$R, labels$G, labels$B, sep = ",")
+
+# Make a lookup vector: names = rgb_key, values = LABEL
+lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
+
+
+# A) Exact lookup using the rgb_key
+
+seurat_obj@meta.data <- seurat_obj@meta.data %>%
+  mutate(quint_region = if_else(
+    # Condition: Is the current value found in our lookup names?
+    quint_region %in% names(lut_rgb), 
+    
+    # If TRUE: Use the lookup value
+    lut_rgb[quint_region],            
+    
+    # If FALSE: Keep the original value
+    quint_region                      
+  ))
+
+
+
+
+```
+#Exporting to CSV
+```{r}
+# saveRDS(
+#   seurat_obj,
+#   file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/seurat_object_f.rds"
+# )
+# write.csv(
+#   data.frame(quint_region = seurat_obj$quint_region),
+#   file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/CosMx_Processing/Probiotics/revised_quint.csv",
+#   row.names = TRUE
+# )
+write.csv(
+  data.frame(quint_region = seurat_obj$quint_region),
+  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/CosMx_Processing/Manuscript/quint_20g_100t.csv",
+  row.names = TRUE
+)
+
+```
+
+
+#Polygon Highlights
+
+
+##cluster1
+```{r}
+
+poly_x <- c(3,-5,-6,-4,3,3)
+poly_y <- c(-8,-4,-6,-13,-13,8)
+
+
+umap_mat <- Embeddings(seurat_obj, "umap")   # or seurat_obj[["umap"]]@cell.embeddings
+head(umap_mat)
+x <- umap_mat[, "umap_1"]
+y <- umap_mat[, "umap_2"]
+
+inside_poly <- sp::point.in.polygon(x, y, poly_x, poly_y) > 0
+
+cells_in_poly <- rownames(umap_mat)[inside_poly]
+
+seurat_poly <- subset(seurat_obj, cells = cells_in_poly)
+
+
+coords_all <- seurat_obj@meta.data[, c("x", "y", "sample_ID")]
+coords_all$cell_id <- rownames(coords_all)
+
+coords_poly <- seurat_poly@meta.data
+coords_poly$cell_id <- rownames(coords_poly)
+
+overlay_plots <- list()
+
+for (s in sample_vec) {
+
+  # cells that are BOTH in this sample and inside the polygon
+  cells_in_sample_poly <- coords_poly$cell_id[coords_poly$sample_ID == s]
+
+  # build plotting df for all cells
+  df_plot <- coords_all[coords_all$sample_ID == s, ]
+  df_plot$in_subset <- df_plot$cell_id %in% cells_in_sample_poly
+
+  p <- ggplot(df_plot, aes(x = x, y = y)) + 
+    geom_point(aes(color = in_subset), size = 0.3, alpha = 0.7) +
+    scale_color_manual(values = c("grey85", "red")) + 
+    coord_equal() +
+    theme_classic() + 
+    ggtitle(paste("Sample:", s)) +
+    guides(color = "none")
+  overlay_plots[[s]] <- p
+  
+  
+    ggsave(
+    filename = paste0("C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/overlay_polygon2_2_", s, ".png"),
+    plot = p,
+    width = 5, height = 5, dpi = 300
+  )
+}
+
+```
+#Differential Expression
+##Log-Reg
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ggrepel) # For non-overlapping labels in the plot
+
+# ==============================================================================
+# 1. SETUP & CONFIGURATION
+# ==============================================================================
+# Define your comparison groups exactly as they appear in metadata
+group_1 <- "MCI"      # The "Test" group (Numerator of Fold Change)
+group_2 <- "Healthy"  # The "Control" group (Denominator)
+
+# Define the metadata column containing these groups
+# (Adjust this if your groups are in a different column, e.g., seurat_obj$condition)
+Idents(seurat_obj) <- "FMT" 
+
+# Check to ensure the depth column exists (Standard Seurat name is 'nCount_RNA')
+if (!"nCount_RNA" %in% colnames(seurat_obj@meta.data)) {
+  stop("Error: 'nCount_RNA' column not found in metadata. Please check your depth column name.")
+}
+
+# ==============================================================================
+# 2. RUN DIFFERENTIAL EXPRESSION (Logistic Regression + Depth Correction)
+# ==============================================================================
+message(paste0("Running DE: ", group_1, " vs ", group_2, " using LR with depth correction..."))
+
+# FindMarkers with Logistic Regression
+de_results <- FindMarkers(
+  object = seurat_obj,
+  ident.1 = group_1,
+  ident.2 = group_2,
+  test.use = "LR",               # Use Logistic Regression
+  latent.vars = "sample_ID",    # <--- THE FIX: Regress out sequencing depth
+  min.pct = 0.1,                 # Gene must be in at least 10% of cells
+  logfc.threshold = 0.0,          # Keep all genes for the volcano plot (even low FC)
+  max.cells.per.ident = 50000
+)
+
+# Add gene names as a column (FindMarkers puts them in rownames)
+de_results$gene <- rownames(de_results)
+
+# Create a classification column for plotting
+de_results$diffexpressed <- "NO"
+de_results$diffexpressed[de_results$avg_log2FC > 0.5 & de_results$p_val_adj < 0.05] <- "UP"
+de_results$diffexpressed[de_results$avg_log2FC < -0.5 & de_results$p_val_adj < 0.05] <- "DOWN"
+
+# Save the raw table
+write.csv(de_results, paste0("DE_LR_SampleCorrected_", group_1, "_vs_", group_2, ".csv"))
+
+# ==============================================================================
+# 3. GENERATE VOLCANO PLOT
+# ==============================================================================
+message("Generating Volcano Plot...")
+
+# Select top 10 genes to label
+top_genes <- rbind(
+  head(subset(de_results, diffexpressed == "UP"), 15),
+  head(subset(de_results, diffexpressed == "DOWN"), 15)
+)
+
+p <- ggplot(de_results, aes(x = avg_log2FC, y = -log10(p_val_adj), col = diffexpressed)) +
+  geom_point(alpha = 0.6) + 
+  theme_minimal() +
+  
+  # Custom Colors
+  scale_color_manual(values = c("DOWN" = "blue", "NO" = "grey", "UP" = "red")) +
+  
+  # Add lines for thresholds
+  geom_vline(xintercept = c(-0.5, 0.5), col = "black", linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), col = "black", linetype = "dashed") +
+  
+  # Add labels for top genes
+  geom_text_repel(data = top_genes, aes(label = gene), show.legend = FALSE, max.overlaps = 20) +
+  
+  # Titles and Labels
+  labs(title = paste0("Volcano Plot: ", group_1, " vs ", group_2),
+       subtitle = "Test: Logistic Regression | Covariate: Sequencing Depth",
+       x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value") +
+  
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Save the plot
+ggsave(paste0("Volcano_LR_", group_1, "_vs_", group_2, ".png"), plot = p, width = 8, height = 6)
+print(p)
+
+message("Done! Results and plot saved.")
+```
+
+```{r}
+
+log2fc_threshold<-0.3219
+de_results$diffexpressed <- "NO"
+de_results$diffexpressed[de_results$avg_log2FC > log2fc_threshold & de_results$p_val_adj < 0.05] <- "UP"
+de_results$diffexpressed[de_results$avg_log2FC < -log2fc_threshold & de_results$p_val_adj < 0.05] <- "DOWN"
+
+# Save the raw table
+write.csv(de_results, paste0("DE_LR_DepthCorrected_", group_1, "_vs_", group_2, ".csv"))
+
+# ==============================================================================
+# 3. GENERATE VOLCANO PLOT
+# ==============================================================================
+message("Generating Volcano Plot...")
+
+# Select top 10 genes to label
+top_up <- de_results %>%
+  filter(diffexpressed == "UP") %>%
+  arrange(desc(avg_log2FC)) %>%
+  head(15)
+
+# Get top 15 lowest (most negative) FC
+top_down <- de_results %>%
+  filter(diffexpressed == "DOWN") %>%
+  arrange(avg_log2FC) %>%
+  head(15)
+
+# Combine them
+top_genes <- rbind(top_up, top_down)
+p <- ggplot(de_results, aes(x = avg_log2FC, y = -log10(p_val_adj), col = diffexpressed)) +
+  geom_point(alpha = 0.6) + 
+  theme_minimal() +
+  
+  # Custom Colors
+  scale_color_manual(values = c("DOWN" = "blue", "NO" = "grey", "UP" = "red")) +
+  
+  # Add lines for thresholds
+  geom_vline(xintercept = c(-log2fc_threshold, log2fc_threshold), col = "black", linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), col = "black", linetype = "dashed") +
+  
+  # Add labels for top genes
+  geom_text_repel(data = top_genes, aes(label = gene), show.legend = FALSE, max.overlaps = 20) +
+  
+  # Titles and Labels
+  labs(title = paste0("Volcano Plot: ", group_1, " vs ", group_2),
+       subtitle = "Test: Logistic Regression | Covariate: Sequencing Depth",
+       x = "Log2 Fold Change",
+       y = "-Log10 Adjusted P-value") +
+  
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Save the plot
+ggsave(paste0("Volcano_LR_", group_1, "_vs_", group_2, ".png"), plot = p, width = 8, height = 6)
+print(p)
+
+message("Done! Results and plot saved.")
+```
