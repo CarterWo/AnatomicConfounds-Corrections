@@ -177,8 +177,4 @@ ezy.plot.volcano(de_results, y_axis="score", top_labels=30)
 | `ezy.plot.feats_bar(de_df, ...)` | Horizontal bar chart of top DE features |
 | `ezy.lmm.*` | DE result loading, correlation, overlap, and concordance utilities |
 
----
 
-## Reproducibility
-
-All stochastic steps use `random.seed(0)` (Python) and fixed seeds in R (`set.seed(42)` or equivalent in variancePartition/DESeq2 calls). Normalization thresholds (`min_gene_cnt`, `min_t_cnt`) are documented at each call site.
