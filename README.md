@@ -88,7 +88,7 @@ Two notebooks run DE on different datasets:
 
 | Notebook | Dataset | Purpose |
 |----------|---------|---------|
-| `DE_scripts/DE_Base_Analysis.ipynb` | Standard dataset (no olfactory) | Primary DE results → feeds post-hoc comparison |
+| `DE_scripts/DE_Base_Analysis.ipynb` | Standard dataset | Primary DE results → feeds post-hoc comparison |
 | `DE_scripts/LMM_all.ipynb` | Composition-engineered subsets (`cortex_up`, `cortex_down`) | Quantify anatomical composition effects |
 
 Both notebooks run in an **R kernel** and implement four models:
