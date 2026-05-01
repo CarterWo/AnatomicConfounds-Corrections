@@ -79,9 +79,9 @@ getwd()
 
 
 
-cfg_file<-make_cfg("C:\Users\woods\OneDrive - University of Missouri\General - Lin Brain Lab - Ogrp\Carter Woods\CosMx_Processing\Manuscript\csvs_20g_100t_no00")
+cfg_file<-make_cfg("/path/to/csvs")
 
-#cfg_file<-make_cfg("C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/CosMx_Processing/Probiotics/H5AD_to_rds_UPDATED_THRESH")
+#cfg_file<-make_cfg("/path/to/csvs")
 
 seurat_obj<-build_seurat_from_folder(cfg_file)
 ```
@@ -92,7 +92,7 @@ meta <- seurat_obj@meta.data   # or seurat_obj[[]]
 
 write.csv(
   meta,
-  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/metadata.csv",
+  file = "/path/to/seurat_export/metadata.csv",
 
   row.names = TRUE  # keep cell barcodes as rownames for index
 )
@@ -102,7 +102,7 @@ library(Seurat)
 pca_mat <- Embeddings(seurat_obj, "pca")
 write.csv(
   pca_mat,
-  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/pca.csv",
+  file = "/path/to/seurat_export/pca.csv",
 
   row.names = TRUE
 )
@@ -111,7 +111,7 @@ write.csv(
 umap_mat <- Embeddings(seurat_obj, "umap")
 write.csv(
   umap_mat,
-  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/umap.csv",
+  file = "/path/to/seurat_export/umap.csv",
 
   row.names = TRUE
 )
@@ -127,11 +127,11 @@ write.csv(
 
 
 LMM_r_sub=read.csv(
-  "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/WB_Residuals/residuals_full_jregion.csv"
+  "/path/to/residuals/residuals_full_jregion.csv"
 )
 
 LMM_r=read.csv(
-  "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/WB_Residuals/residuals_full.csv"
+  "/path/to/residuals/residuals_full.csv"
 )
 var_xplained<-c('r2_group',	'r2_napari_region',	'r2_cell_type')
 
@@ -177,7 +177,7 @@ df_counts_sub
 df_genes_sub
 
 genes_df <- df_genes$genes[[3]]
-write.csv(genes_df, "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/WB_Residuals/anatomically_driven_genes.csv", row.names = FALSE)
+write.csv(genes_df, "/path/to/residuals/anatomically_driven_genes.csv", row.names = FALSE)
 ```
 
 
@@ -188,7 +188,7 @@ write.csv(genes_df, "C:/Users/woods/OneDrive - University of Missouri/General - 
 
 cluster_name<-'Run0_Neighborhood.Analysis.1_1_assignments'
 sample_vec <- unique(seurat_obj$sample_ID)
-out_dir <- paste0("C:/Users/woods/OneDrive/Documents/Quint/Images/Probiotics")
+out_dir <- paste0("/path/to/quint_images")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 for (i in seq_along(sample_vec)) {
 
@@ -306,8 +306,8 @@ sample_vec <- c("120L","323DY","118B","1182L","368R","217R", "144_2L", "367R","2
 color_codes <- list()
 plots <- list()
 for (i in seq_along(sample_vec)){
-  fp <- paste0("C:/Users/woods/OneDrive/Documents/Quint/Images/Combination/Output/Images/368R_trial_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
-  #fp <- paste0("C:/Users/woods/OneDrive/Documents/Quint/Images/Probiotics/Output/Images/Probiotics_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
+  fp <- paste0("/path/to/quint_images/368R_trial_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
+  #fp <- paste0("/path/to/quint_images/Output/Images/Probiotics_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
   message(fp)
   message(sample_vec[[i]])
   atlas_img <- load.image(fp)
@@ -566,7 +566,7 @@ print(frequency_table)
 
 # Cntrl Ahift M %>% 
 # Alt + - <- 
-labels_path <- "C:/Users/woods/OneDrive/Documents/Quint/Color_key.xlsm"
+labels_path <- "/path/to/quint/Color_key.xlsm"
 
 labels <- read_excel(
   labels_path, sheet=1
@@ -590,7 +590,7 @@ lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
 # ==============================================================================
 
 
-labels_path <- "C:/Users/woods/OneDrive/Documents/Quint/Color_key.xlsm"
+labels_path <- "/path/to/quint/Color_key.xlsm"
 
 labels <- read_excel(
   labels_path, sheet=1
@@ -627,16 +627,16 @@ seurat_obj@meta.data <- seurat_obj@meta.data %>%
 ```{r}
 # saveRDS(
 #   seurat_obj,
-#   file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/seurat_construct/seurat_object_f.rds"
+#   file = "/path/to/seurat_export/seurat_object.rds"
 # )
 # write.csv(
 #   data.frame(quint_region = seurat_obj$quint_region),
-#   file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/CosMx_Processing/Probiotics/revised_quint.csv",
+#   file = "/path/to/quint_output.csv",
 #   row.names = TRUE
 # )
 write.csv(
   data.frame(quint_region = seurat_obj$quint_region),
-  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/CosMx_Processing/Manuscript/quint_20g_100t.csv",
+  file = "/path/to/quint_output.csv",
   row.names = TRUE
 )
 
@@ -693,7 +693,7 @@ for (s in sample_vec) {
   
   
     ggsave(
-    filename = paste0("C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Carter Woods/Vignette_project/misc_data/overlay_polygon2_2_", s, ".png"),
+    filename = paste0("/path/to/output/overlay_polygon_", s, ".png"),
     plot = p,
     width = 5, height = 5, dpi = 300
   )

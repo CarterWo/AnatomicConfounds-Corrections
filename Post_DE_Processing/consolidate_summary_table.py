@@ -20,7 +20,7 @@ import pandas as pd
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-FIG_BASE = Path(r"C:\Users\woods\OneDrive - University of Missouri\General - Lin Brain Lab - Ogrp\Carter Woods\CosMx_Processing\Manuscript\LMM_Model_Comparison\S&Du_(search)")
+FIG_BASE = Path("/path/to/LMM_Model_Comparison/output")
 
 # ── Source CSVs ──────────────────────────────────────────────────────────────
 # G1 vs G2 sources
