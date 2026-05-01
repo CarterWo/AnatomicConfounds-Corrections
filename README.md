@@ -113,24 +113,6 @@ Each output CSV contains one row per gene with logFC and significance columns. `
 
 This notebook loads and compares DE results across models and annotation strategies using `ezy_seq.lmm`.
 
-```python
-import ezy_seq.lmm as lmm
-
-# Load paired UP/DOWN results for a given model and annotation
-pairs = lmm.load_seurat_dream_pairs("/path/to/de/results", annotation="napari")
-
-# Compare logFC correlation between two models
-corr = lmm.calculate_correlations(df1, df2)
-
-# Directional concordance (fraction of genes with same sign)
-concordance = lmm.calculate_directional_concordance(df1, df2)
-
-# Gene overlap (Fisher's exact test + Jaccard)
-overlap = lmm.analyze_overlap(df1, df2)
-
-# Full pairwise comparison across all models/annotations
-summary = lmm.compute_full_comparison(results_dict)
-```
 
 **File naming convention** expected by `ezy_seq.lmm`:
 ```
