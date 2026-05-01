@@ -79,10 +79,6 @@ cortex_down = ezy.set_region_abundance_by_FMT(adata_full, target_by_Cortex_down,
 ```
 Cells are randomly subsampled per treatment group to shift isocortex proportion to +1 SD or −1 SD of the cross-sample mean, while redistributing the remaining cell budget across non-cortex regions proportionally. See `Pre_processing/Napari_annotation.ipynb` for target definitions.
 
-**1g. Export for pseudobulk DE**
-```python
-ezy.pseudobulk_export(adata_full, group_by=["sample_ID", "ct_simple"])
-```
 
 ---
 
@@ -158,7 +154,6 @@ UMAP embeddings are generated in Scanpy (`sc.pp.neighbors` + `sc.tl.umap`). Figu
 | `ezy.set_region_abundance_by_FMT(adata, target_by_fmt, total_per_fmt)` | Composition-engineering: subsample to target regional proportions per treatment group |
 | `ezy.rank_DE(adata, groupby, comparisons)` | Wilcoxon DE across one or more group pairs |
 | `ezy.impact_metrics(naive_df, anat_df, region_markers)` | MAB and Bias Ratio: quantify anatomical label contribution to DE |
-| `ezy.pseudobulk_export(adata, group_by)` | Aggregate to pseudobulk counts for bulk DE methods |
 | `ezy.plot.volcano(de_df, ...)` | Volcano plot with optional gene labeling |
 | `ezy.plot.umap(adata, ...)` | UMAP plots with group filtering |
 | `ezy.plot.rank_and_plot(adata, ...)` | Rank genes and plot top features |
