@@ -109,19 +109,18 @@ DESEQ2{UP|DOWN}_{celltype}_PB.csv               # DESeq2 pseudobulk
 
 ---
 
-### Step 3 — Post-DE Processing (`Post_DE_Processing/LMM_output_procesing.ipynb`)
+### Step 3 — Post-DE Processing (`Post_DE_Processing/`)
 
-Loads and compares DE results across models and annotation strategies using `ezy_seq.lmm`.
+Five Python scripts compare DE results across models and annotation strategies:
 
-```python
-import ezy_seq.lmm as lmm
-
-pairs    = lmm.load_seurat_dream_pairs("/path/to/de/results", annotation="napari")
-corr     = lmm.calculate_correlations(df1, df2)
-concord  = lmm.calculate_directional_concordance(df1, df2)
-overlap  = lmm.analyze_overlap(df1, df2)
-summary  = lmm.compute_full_comparison(results_dict)
-```
+| Script | Purpose |
+|--------|---------|
+| `consolidate_summary_table.py` | Aggregate DE results into a single summary table |
+| `visualize_anatomic_inclusion.py` | Compare blind vs. anatomically-aware models (MAB, Bias Ratio) |
+| `visualize_g1_g2_comparison.py` | Compare composition-engineered datasets (cortex_up vs. cortex_down) |
+| `visualize_seurat_logreg.py` | Visualize logistic regression DE results |
+| `visualize_wilcoxon_deseq2.py` | Visualize Wilcoxon and DESeq2 DE results |
+| `plot_utils.py` | Shared plotting utilities |
 
 Mean Absolute Bias (MAB) and Bias Ratio metrics are computed via `ezy.impact_metrics` to quantify the contribution of anatomical labels to DE effect sizes.
 
