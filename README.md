@@ -82,7 +82,22 @@ Cells are randomly subsampled per treatment group to shift isocortex proportion 
 
 ---
 
-### Step 2 — Differential Expression
+### Step 2 — Visualization (`Visualization_Scripts/UMAPS.ipynb`)
+
+```python
+import ezy_seq as ezy
+
+ezy.plot.umap(adata_full, color_by="ct_simple", groups=[("FMT", ["Healthy", "MCI"])])
+
+de_results = ezy.rank_DE(adata_full, groupby="FMT", comparisons=[["Healthy", "MCI"]])
+ezy.plot.volcano(de_results, y_axis="score", top_labels=30)
+```
+
+UMAP embeddings are generated in Scanpy (`sc.pp.neighbors` + `sc.tl.umap`). Figures are produced using matplotlib.
+
+---
+
+### Step 3 — Differential Expression
 
 Two notebooks run DE on different datasets:
 
@@ -109,7 +124,7 @@ DESEQ2{UP|DOWN}_{celltype}_PB.csv               # DESeq2 pseudobulk
 
 ---
 
-### Step 3 — Post-DE Processing (`Post_DE_Processing/`)
+### Step 4 — Post-DE Processing (`Post_DE_Processing/`)
 
 Five Python scripts compare DE results across models and annotation strategies:
 
@@ -123,21 +138,6 @@ Five Python scripts compare DE results across models and annotation strategies:
 | `plot_utils.py` | Shared plotting utilities |
 
 Mean Absolute Bias (MAB) and Bias Ratio metrics are computed via `ezy.impact_metrics` to quantify the contribution of anatomical labels to DE effect sizes.
-
----
-
-### Step 4 — Visualization (`Visualization_Scripts/UMAPS.ipynb`)
-
-```python
-import ezy_seq as ezy
-
-ezy.plot.umap(adata_full, color_by="ct_simple", groups=[("FMT", ["Healthy", "MCI"])])
-
-de_results = ezy.rank_DE(adata_full, groupby="FMT", comparisons=[["Healthy", "MCI"]])
-ezy.plot.volcano(de_results, y_axis="score", top_labels=30)
-```
-
-UMAP embeddings are generated in Scanpy (`sc.pp.neighbors` + `sc.tl.umap`). Figures are produced using matplotlib.
 
 ---
 
