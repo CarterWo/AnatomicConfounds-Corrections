@@ -499,74 +499,128 @@ def read_dictionary(dictionary_dir: str | os.PathLike) -> dict:
     return master_dictionary
 
 
-def stouffer_signed(pvals, signs, weights):
-    """Combine p-values across strata using a signed Stouffer z-score method."""
-    z = np.sign(signs) * norm.ppf(1 - np.asarray(pvals) / 2.0)
-    w = np.asarray(weights, float)
-    Z = np.sum(w * z) / np.sqrt(np.sum(w ** 2))
-    p = 2 * (1 - norm.cdf(abs(Z)))
-    return Z, p
+def _alloc_by_baseline_with_caps(baseline_counts: pd.Series, caps: pd.Series, total: int) -> pd.Series:
+    out = pd.Series(0, index=baseline_counts.index, dtype=int)
+    total = int(total)
+    if total <= 0 or baseline_counts.sum() <= 0 or caps.sum() <= 0:
+        return out
+    weights = baseline_counts.clip(lower=0).astype(float)
+    weights = weights / (weights.sum() if weights.sum() > 0 else 1.0)
+    raw = weights * total
+    base = np.floor(raw).astype(int)
+    take = base.clip(upper=caps.astype(int))
+    out += take
+    rem = total - int(take.sum())
+    if rem <= 0:
+        return out
+    frac = (raw - base).sort_values(ascending=False)
+    for idx in frac.index:
+        if rem == 0:
+            break
+        if out[idx] < int(caps.get(idx, 0)):
+            out[idx] += 1
+            rem -= 1
+    return out
 
 
-def wilcoxon_stouffer_by_region(adata, groupby, comparisons, region_col, min_cells=20):
+def set_region_abundance_by_FMT(
+    adata,
+    target_by_fmt,
+    total_per_fmt=None,
+    region_col: str = "napari_region",
+    fmt_col: str = "FMT",
+    random_state=0,
+):
     """
-    Run Wilcoxon DE within each anatomical region and meta-analyze via signed Stouffer.
-
-    Regions are weighted by sqrt(n_cells). Regions with fewer than `min_cells` or
-    only one group present are skipped.
+    Composition-engineering experiment: subsample cells per treatment group to hit
+    target regional proportions (counts or fractions) while keeping total cell count
+    fixed. Unspecified regions retain their baseline relative abundances.
 
     Parameters
     ----------
     adata : AnnData
-    groupby : str
-        .obs column with group labels.
-    comparisons : list[tuple[str, str]]
-        List of (target, reference) pairs passed to rank_DE.
+    target_by_fmt : dict[str, dict[str, int | float]]
+        Maps each FMT group to a {region: target} dict. Targets may be absolute
+        counts (int) or fractions (float).
+    total_per_fmt : int | dict[str, int] | None
+        Per-group cell budget. Defaults to all available cells.
     region_col : str
-        .obs column with region labels.
-    min_cells : int
-        Minimum cells required in a region to include it.
+        obs column with region labels (default: 'napari_region').
+    fmt_col : str
+        obs column with treatment group labels (default: 'FMT').
+    random_state : int | None
+        RNG seed for reproducibility.
 
     Returns
     -------
-    pd.DataFrame
-        Columns: gene, Z, p_stouffer, log2fc_meta, padj_stouffer, direction.
+    AnnData
+        Subsampled copy containing only the selected cells.
     """
-    stratum = {}
-    for region, idx in adata.obs.groupby(region_col).groups.items():
-        sub = adata[idx].copy()
-        if sub.n_obs < min_cells or sub.obs[groupby].nunique() < 2:
-            continue
-        res = rank_DE(sub, groupby, comparisons)
-        res = res.set_index("gene")
-        stratum[region] = res[["score", "log2fc"]].rename(
-            columns={"score": f"z_{region}", "log2fc": f"log2fc_{region}"}
-        )
+    rng = np.random.default_rng(random_state)
+    obs_rf = adata.obs[[region_col, fmt_col]].dropna().copy()
+    avail = obs_rf.groupby([fmt_col, region_col]).size().unstack(fill_value=0)
+    selected = []
 
-    common = None
-    for df in stratum.values():
-        common = df.index if common is None else common.intersection(df.index)
-    if common is None or len(common) == 0:
-        raise ValueError("No overlapping genes across regions.")
+    for fmt in avail.index:
+        row = avail.loc[fmt]
+        total_avail = int(row.sum())
 
-    M = pd.concat([df.loc[common] for df in stratum.values()], axis=1)
-    regions = list(stratum.keys())
-    weights = [np.sqrt(adata[adata.obs[region_col] == r].n_obs) for r in regions]
+        if isinstance(total_per_fmt, dict):
+            t = int(min(total_per_fmt.get(fmt, total_avail), total_avail))
+        elif isinstance(total_per_fmt, int):
+            t = int(min(total_per_fmt, total_avail))
+        else:
+            t = total_avail
 
-    Z, P, LFCm = [], [], []
-    for g in common:
-        pvals = M.loc[g, [f"p_{r}" for r in regions]].values
-        signs = np.sign(M.loc[g, [f"log2fc_{r}" for r in regions]].values)
-        z, p = stouffer_signed(pvals, signs, weights)
-        Z.append(z)
-        P.append(p)
-        l = M.loc[g, [f"log2fc_{r}" for r in regions]].values
-        LFCm.append(float(np.dot(weights, l) / (np.sum(weights) if np.sum(weights) > 0 else 1.0)))
+        baseline = (row / row.sum()).fillna(0)
+        desired = pd.Series(0, index=row.index, dtype=int)
 
-    out = pd.DataFrame({"gene": M.index, "Z": Z, "p_stouffer": P, "log2fc_meta": LFCm})
-    out["padj_stouffer"] = multipletests(out["p_stouffer"], method="fdr_bh")[1]
-    out["direction"] = np.sign(out["log2fc_meta"]).astype(int)
-    return out.sort_values("p_stouffer").reset_index(drop=True)
+        if fmt in target_by_fmt:
+            tgt = target_by_fmt[fmt]
+            is_count = all(isinstance(v, (int, np.integer)) for v in tgt.values())
+            if is_count:
+                for r, v in tgt.items():
+                    if r in desired.index:
+                        desired[r] = int(v)
+            else:
+                frac_map = {r: float(v) for r, v in tgt.items() if r in desired.index}
+                sfrac = sum(frac_map.values())
+                if sfrac > 1.0:
+                    frac_map = {r: v / sfrac for r, v in frac_map.items()}
+                for r, fr in frac_map.items():
+                    desired[r] = int(round(fr * t))
+
+            desired = desired.clip(upper=row)
+            unspecified = [r for r in desired.index if r not in tgt]
+            remain = max(0, t - int(desired.sum()))
+            if unspecified and remain > 0:
+                caps_unspec = (row - desired).loc[unspecified].clip(lower=0)
+                desired.loc[unspecified] += _alloc_by_baseline_with_caps(
+                    baseline.loc[unspecified], caps_unspec, remain
+                )
+        else:
+            desired = _alloc_by_baseline_with_caps(row, row.clip(lower=0), t)
+
+        while int(desired.sum()) > t:
+            biggest = desired.idxmax()
+            if desired[biggest] == 0:
+                break
+            desired[biggest] -= 1
+        desired = desired.clip(upper=row)
+
+        sub = obs_rf[obs_rf[fmt_col] == fmt]
+        for region, need in desired.items():
+            n = int(need)
+            if n <= 0:
+                continue
+            pool = sub.index[sub[region_col] == region].to_numpy()
+            selected.extend(pool.tolist() if n >= len(pool) else
+                            rng.choice(pool, size=n, replace=False).tolist())
+
+    sel_index = [idx for idx in obs_rf.index if idx in set(selected)]
+    if not sel_index:
+        raise ValueError("No cells selected.")
+    return adata[sel_index].copy()
 
 
 def impact_metrics(naive_df, anat_df, region_markers: set, alpha=0.05):
@@ -613,88 +667,3 @@ def impact_metrics(naive_df, anat_df, region_markers: set, alpha=0.05):
         "leak_naive":               leak_naive,
         "leak_anat":                leak_anat,
     }
-
-
-def bootstrap_stability(adata, groupby, comparisons, region_col, n_boot=100, unit_col="FOV"):
-    """
-    Estimate DE result stability via bootstrap resampling of spatial units (FOVs).
-
-    Computes average pairwise Jaccard similarity of significant gene sets across
-    consecutive bootstrap iterations, separately for naive (pooled) and
-    anatomy-aware DE. Higher values indicate more reproducible results.
-
-    Parameters
-    ----------
-    adata : AnnData
-    groupby, comparisons, region_col : see rank_DE / wilcoxon_stouffer_by_region.
-    n_boot : int
-        Number of bootstrap iterations.
-    unit_col : str
-        .obs column identifying spatial units to resample (e.g., "FOV").
-
-    Returns
-    -------
-    dict
-        {'stability_naive': float, 'stability_anat': float}
-    """
-    sets_naive, sets_anat = [], []
-    units = adata.obs[unit_col].unique().tolist()
-    for _ in range(n_boot):
-        chosen = set(npr.choice(units, size=len(units), replace=True))
-        idx = adata.obs[adata.obs[unit_col].isin(chosen)].index
-        sub = adata[idx].copy()
-        n = rank_DE(sub, groupby, comparisons)
-        S_n = set(n.loc[n["padj"] <= 0.05, "gene"])
-        a = wilcoxon_stouffer_by_region(sub, groupby, comparisons, region_col)
-        S_a = set(a.loc[a["padj_stouffer"] <= 0.05, "gene"])
-        sets_naive.append(S_n)
-        sets_anat.append(S_a)
-
-    def avg_jaccard(sets):
-        js = []
-        for i in range(len(sets) - 1):
-            inter = len(sets[i] & sets[i + 1])
-            uni   = len(sets[i] | sets[i + 1])
-            js.append(inter / max(1, uni))
-        return float(np.mean(js))
-
-    return {
-        "stability_naive": avg_jaccard(sets_naive),
-        "stability_anat":  avg_jaccard(sets_anat),
-    }
-
-
-def region_mix_shuffle(adata, region_col, treatment_col, frac_swap=0.2, unit_col="FOV"):
-    """
-    Permutation test helper: induce treatment-region confounding by swapping labels.
-
-    Swaps `frac_swap` of spatial units' treatment labels within each region, then
-    returns the modified treatment series. Assign this back to a copy of adata
-    to test whether anatomy-aware DE is robust to induced confounding.
-
-    Parameters
-    ----------
-    adata : AnnData
-    region_col : str
-        .obs column with region labels.
-    treatment_col : str
-        .obs column with treatment labels to shuffle.
-    frac_swap : float
-        Fraction of units per region to swap.
-    unit_col : str
-        .obs column identifying spatial units (e.g., "FOV").
-
-    Returns
-    -------
-    pd.Series
-        New treatment label series (same index as adata.obs).
-    """
-    obs = adata.obs.copy()
-    units = obs[[unit_col, region_col]].drop_duplicates()
-    for r in units[region_col].unique():
-        u = units[units[region_col] == r][unit_col].tolist()
-        k = max(1, int(len(u) * frac_swap))
-        flip = set(npr.choice(u, size=k, replace=False))
-        mask = obs[unit_col].isin(flip)
-        obs.loc[mask, treatment_col] = obs.loc[mask, treatment_col].sample(frac=1.0).values
-    return obs[treatment_col]
