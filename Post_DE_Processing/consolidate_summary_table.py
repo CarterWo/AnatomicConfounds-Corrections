@@ -164,7 +164,7 @@ if not g1g2_df.empty:
 else:
     sheet_g1g2_fmt = pd.DataFrame()
 
-# ── Sheet 4: Formatted Annotation Comparisons (mirrors user edits) ─────────
+# ── Sheet 4: Formatted Annotation Comparisons ──────────────────────────────
 if not annot_df.empty:
     afmt = annot_df.copy()
     afmt["cell_type"] = afmt["cell_type"].replace("WholeBrain", "All")

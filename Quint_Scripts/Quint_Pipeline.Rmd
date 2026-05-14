@@ -1,14 +1,13 @@
 ---
-title: "CressExpression"
+title: "QuintHandling"
 output: html_document
-date: "2025-11-17"
+date: "2026-5-14"
 ---
 
 
 ```{r}
 library(dplyr)
 library(ggplot2)
-
 library(Seurat)
 library("CrossExpression")
 library(Matrix)
@@ -85,108 +84,13 @@ cfg_file<-make_cfg("/path/to/csvs")
 
 seurat_obj<-build_seurat_from_folder(cfg_file)
 ```
-#rds to h5ad
-```{r}
-# Metadata (obs in AnnData)
-meta <- seurat_obj@meta.data   # or seurat_obj[[]]
-
-write.csv(
-  meta,
-  file = "/path/to/seurat_export/metadata.csv",
-
-  row.names = TRUE  # keep cell barcodes as rownames for index
-)
-library(Seurat)
-
-# PCA embeddings (cells × PCs)
-pca_mat <- Embeddings(seurat_obj, "pca")
-write.csv(
-  pca_mat,
-  file = "/path/to/seurat_export/pca.csv",
-
-  row.names = TRUE
-)
-
-# UMAP embeddings (cells × 2)
-umap_mat <- Embeddings(seurat_obj, "umap")
-write.csv(
-  umap_mat,
-  file = "/path/to/seurat_export/umap.csv",
-
-  row.names = TRUE
-)
-
-# Repeat for other reductions if needed, e.g. t-SNE:
-# tsne_mat <- Embeddings(seurat_obj, "tsne")
-# write.csv(tsne_mat, "tsne.csv", quote = FALSE, row.names = TRUE)
-
-```
-
-
-```{r}
-
-
-LMM_r_sub=read.csv(
-  "/path/to/residuals/residuals_full_jregion.csv"
-)
-
-LMM_r=read.csv(
-  "/path/to/residuals/residuals_full.csv"
-)
-var_xplained<-c('r2_group',	'r2_napari_region',	'r2_cell_type')
-
-df_with_largest <- LMM_r %>%
-  rowwise() %>%
-  mutate(
-    largest = var_xplained[
-      which.max(c_across(all_of(var_xplained)))
-    ]
-  ) %>%
-  ungroup()
-
-# count summary (original behavior)
-df_counts <- df_with_largest %>% count(largest)
-
-# gene names for each category
-df_genes <- df_with_largest %>%
-  group_by(largest) %>%
-  summarise(genes = list(gene))
-
-# ---- SUBSET MODEL ----
-var_xplained <- c("r2_group","r2_napari_region")
-
-df_with_largest_sub <- LMM_r_sub %>%
-  rowwise() %>%
-  mutate(
-    largest = var_xplained[
-      which.max(c_across(all_of(var_xplained)))
-    ]
-  ) %>%
-  ungroup()
-
-df_counts_sub <- df_with_largest_sub %>% count(largest)
-
-df_genes_sub <- df_with_largest_sub %>%
-  group_by(largest) %>%
-  summarise(genes = list(gene))
-
-# print outputs
-df_counts
-df_genes
-df_counts_sub
-df_genes_sub
-
-genes_df <- df_genes$genes[[3]]
-write.csv(genes_df, "/path/to/residuals/anatomically_driven_genes.csv", row.names = FALSE)
-```
-
 
 
 #transforming for QUINT
 ```{r}
 
 
-cluster_name<-'Run0_Neighborhood.Analysis.1_1_assignments'
+cluster_name<-'call_type_column'
 sample_vec <- unique(seurat_obj$sample_ID)
 out_dir <- paste0("/path/to/quint_images")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
@@ -283,15 +187,11 @@ for (i in seq_along(sample_vec)) {
   )
 
 }
-
-
-
+##################################
+#HERE INPUT THE IMAGES INTO QUINT#
+##################################
 ```
 
-```{r}
-sample_vec
-
-```
 
 #Inverse transforming
 
@@ -301,12 +201,11 @@ library(imager)
 library(dplyr)
 
 # 1. Setup specific to Sample 368R (match your loop variables)
-#sample_vec <- unique(seurat_obj$sample_ID)
-sample_vec <- c("120L","323DY","118B","1182L","368R","217R", "144_2L", "367R","215L")
+sample_vec <- unique(seurat_obj$sample_ID)#may require customization to match order
 color_codes <- list()
 plots <- list()
 for (i in seq_along(sample_vec)){
-  fp <- paste0("/path/to/quint_images/368R_trial_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
+  fp <- paste0("/path/to/quint_images/segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
   #fp <- paste0("/path/to/quint_images/Output/Images/Probiotics_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
   message(fp)
   message(sample_vec[[i]])
@@ -447,20 +346,7 @@ for (i in seq_along(sample_ids)) {
       aes(color = quint_region),
       size  = 0.4,
       alpha = 0.9
-    ) #+
-    # scale_color_discrete(name = paste0("Unmatched regions: ",s)) +
-    # guides(color = guide_legend(override.aes = list(size = 2.5))) +
-    # coord_equal() +
-    # ggtitle(paste0("Unmatched atlas entries –", s)) +
-    # theme_void() +
-    # theme(
-    #   plot.background  = element_rect(fill = "white", color = NA),
-    #   panel.background = element_rect(fill = "white", color = NA),
-    #   legend.position  = "right",
-    #   legend.key.size = unit(1.0, "lines"),
-    #   plot.title       = element_text(colour = "white")
-    # )
-
+    ) 
 
   plots_unmatched[[i]] <- p
 }
@@ -476,11 +362,11 @@ plots_unmatched[[6]]
 plots_unmatched[[7]]
 plots_unmatched[[8]]
 plots_unmatched[[9]]
-# or e.g.: plots_unmatched[["368R"]]
+
 ```
 
 ```{r}
-# Region names that *are* known from the atlas
+
 named_labels <- unique(as.character(lut_rgb))
 
 sample_ids <- sort(unique(seurat_obj$sample_ID))
@@ -594,7 +480,6 @@ labels_path <- "/path/to/quint/Color_key.xlsm"
 
 labels <- read_excel(
   labels_path, sheet=1
-
 )
 
 colnames(labels) <- c("R", "G", "B", "macro", "LABEL")
@@ -604,248 +489,23 @@ labels$rgb_key <- paste(labels$R, labels$G, labels$B, sep = ",")
 # Make a lookup vector: names = rgb_key, values = LABEL
 lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
 
-
 # A) Exact lookup using the rgb_key
 
 seurat_obj@meta.data <- seurat_obj@meta.data %>%
   mutate(quint_region = if_else(
     # Condition: Is the current value found in our lookup names?
     quint_region %in% names(lut_rgb), 
-    
     # If TRUE: Use the lookup value
     lut_rgb[quint_region],            
-    
     # If FALSE: Keep the original value
     quint_region                      
   ))
-
-
-
-
 ```
 #Exporting to CSV
 ```{r}
-# saveRDS(
-#   seurat_obj,
-#   file = "/path/to/seurat_export/seurat_object.rds"
-# )
-# write.csv(
-#   data.frame(quint_region = seurat_obj$quint_region),
-#   file = "/path/to/quint_output.csv",
-#   row.names = TRUE
-# )
 write.csv(
   data.frame(quint_region = seurat_obj$quint_region),
   file = "/path/to/quint_output.csv",
   row.names = TRUE
 )
-
-```
-
-
-#Polygon Highlights
-
-
-##cluster1
-```{r}
-
-poly_x <- c(3,-5,-6,-4,3,3)
-poly_y <- c(-8,-4,-6,-13,-13,8)
-
-
-umap_mat <- Embeddings(seurat_obj, "umap")   # or seurat_obj[["umap"]]@cell.embeddings
-head(umap_mat)
-x <- umap_mat[, "umap_1"]
-y <- umap_mat[, "umap_2"]
-
-inside_poly <- sp::point.in.polygon(x, y, poly_x, poly_y) > 0
-
-cells_in_poly <- rownames(umap_mat)[inside_poly]
-
-seurat_poly <- subset(seurat_obj, cells = cells_in_poly)
-
-
-coords_all <- seurat_obj@meta.data[, c("x", "y", "sample_ID")]
-coords_all$cell_id <- rownames(coords_all)
-
-coords_poly <- seurat_poly@meta.data
-coords_poly$cell_id <- rownames(coords_poly)
-
-overlay_plots <- list()
-
-for (s in sample_vec) {
-
-  # cells that are BOTH in this sample and inside the polygon
-  cells_in_sample_poly <- coords_poly$cell_id[coords_poly$sample_ID == s]
-
-  # build plotting df for all cells
-  df_plot <- coords_all[coords_all$sample_ID == s, ]
-  df_plot$in_subset <- df_plot$cell_id %in% cells_in_sample_poly
-
-  p <- ggplot(df_plot, aes(x = x, y = y)) + 
-    geom_point(aes(color = in_subset), size = 0.3, alpha = 0.7) +
-    scale_color_manual(values = c("grey85", "red")) + 
-    coord_equal() +
-    theme_classic() + 
-    ggtitle(paste("Sample:", s)) +
-    guides(color = "none")
-  overlay_plots[[s]] <- p
-  
-  
-    ggsave(
-    filename = paste0("/path/to/output/overlay_polygon_", s, ".png"),
-    plot = p,
-    width = 5, height = 5, dpi = 300
-  )
-}
-
-```
-#Differential Expression
-##Log-Reg
-```{r}
-library(Seurat)
-library(ggplot2)
-library(dplyr)
-library(ggrepel) # For non-overlapping labels in the plot
-
-# ==============================================================================
-# 1. SETUP & CONFIGURATION
-# ==============================================================================
-# Define your comparison groups exactly as they appear in metadata
-group_1 <- "MCI"      # The "Test" group (Numerator of Fold Change)
-group_2 <- "Healthy"  # The "Control" group (Denominator)
-
-# Define the metadata column containing these groups
-# (Adjust this if your groups are in a different column, e.g., seurat_obj$condition)
-Idents(seurat_obj) <- "FMT" 
-
-# Check to ensure the depth column exists (Standard Seurat name is 'nCount_RNA')
-if (!"nCount_RNA" %in% colnames(seurat_obj@meta.data)) {
-  stop("Error: 'nCount_RNA' column not found in metadata. Please check your depth column name.")
-}
-
-# ==============================================================================
-# 2. RUN DIFFERENTIAL EXPRESSION (Logistic Regression + Depth Correction)
-# ==============================================================================
-message(paste0("Running DE: ", group_1, " vs ", group_2, " using LR with depth correction..."))
-
-# FindMarkers with Logistic Regression
-de_results <- FindMarkers(
-  object = seurat_obj,
-  ident.1 = group_1,
-  ident.2 = group_2,
-  test.use = "LR",               # Use Logistic Regression
-  latent.vars = "sample_ID",    # <--- THE FIX: Regress out sequencing depth
-  min.pct = 0.1,                 # Gene must be in at least 10% of cells
-  logfc.threshold = 0.0,          # Keep all genes for the volcano plot (even low FC)
-  max.cells.per.ident = 50000
-)
-
-# Add gene names as a column (FindMarkers puts them in rownames)
-de_results$gene <- rownames(de_results)
-
-# Create a classification column for plotting
-de_results$diffexpressed <- "NO"
-de_results$diffexpressed[de_results$avg_log2FC > 0.5 & de_results$p_val_adj < 0.05] <- "UP"
-de_results$diffexpressed[de_results$avg_log2FC < -0.5 & de_results$p_val_adj < 0.05] <- "DOWN"
-
-# Save the raw table
-write.csv(de_results, paste0("DE_LR_SampleCorrected_", group_1, "_vs_", group_2, ".csv"))
-
-# ==============================================================================
-# 3. GENERATE VOLCANO PLOT
-# ==============================================================================
-message("Generating Volcano Plot...")
-
-# Select top 10 genes to label
-top_genes <- rbind(
-  head(subset(de_results, diffexpressed == "UP"), 15),
-  head(subset(de_results, diffexpressed == "DOWN"), 15)
-)
-
-p <- ggplot(de_results, aes(x = avg_log2FC, y = -log10(p_val_adj), col = diffexpressed)) +
-  geom_point(alpha = 0.6) + 
-  theme_minimal() +
-  
-  # Custom Colors
-  scale_color_manual(values = c("DOWN" = "blue", "NO" = "grey", "UP" = "red")) +
-  
-  # Add lines for thresholds
-  geom_vline(xintercept = c(-0.5, 0.5), col = "black", linetype = "dashed") +
-  geom_hline(yintercept = -log10(0.05), col = "black", linetype = "dashed") +
-  
-  # Add labels for top genes
-  geom_text_repel(data = top_genes, aes(label = gene), show.legend = FALSE, max.overlaps = 20) +
-  
-  # Titles and Labels
-  labs(title = paste0("Volcano Plot: ", group_1, " vs ", group_2),
-       subtitle = "Test: Logistic Regression | Covariate: Sequencing Depth",
-       x = "Log2 Fold Change",
-       y = "-Log10 Adjusted P-value") +
-  
-  theme(plot.title = element_text(hjust = 0.5))
-
-# Save the plot
-ggsave(paste0("Volcano_LR_", group_1, "_vs_", group_2, ".png"), plot = p, width = 8, height = 6)
-print(p)
-
-message("Done! Results and plot saved.")
-```
-
-```{r}
-
-log2fc_threshold<-0.3219
-de_results$diffexpressed <- "NO"
-de_results$diffexpressed[de_results$avg_log2FC > log2fc_threshold & de_results$p_val_adj < 0.05] <- "UP"
-de_results$diffexpressed[de_results$avg_log2FC < -log2fc_threshold & de_results$p_val_adj < 0.05] <- "DOWN"
-
-# Save the raw table
-write.csv(de_results, paste0("DE_LR_DepthCorrected_", group_1, "_vs_", group_2, ".csv"))
-
-# ==============================================================================
-# 3. GENERATE VOLCANO PLOT
-# ==============================================================================
-message("Generating Volcano Plot...")
-
-# Select top 10 genes to label
-top_up <- de_results %>%
-  filter(diffexpressed == "UP") %>%
-  arrange(desc(avg_log2FC)) %>%
-  head(15)
-
-# Get top 15 lowest (most negative) FC
-top_down <- de_results %>%
-  filter(diffexpressed == "DOWN") %>%
-  arrange(avg_log2FC) %>%
-  head(15)
-
-# Combine them
-top_genes <- rbind(top_up, top_down)
-p <- ggplot(de_results, aes(x = avg_log2FC, y = -log10(p_val_adj), col = diffexpressed)) +
-  geom_point(alpha = 0.6) + 
-  theme_minimal() +
-  
-  # Custom Colors
-  scale_color_manual(values = c("DOWN" = "blue", "NO" = "grey", "UP" = "red")) +
-  
-  # Add lines for thresholds
-  geom_vline(xintercept = c(-log2fc_threshold, log2fc_threshold), col = "black", linetype = "dashed") +
-  geom_hline(yintercept = -log10(0.05), col = "black", linetype = "dashed") +
-  
-  # Add labels for top genes
-  geom_text_repel(data = top_genes, aes(label = gene), show.legend = FALSE, max.overlaps = 20) +
-  
-  # Titles and Labels
-  labs(title = paste0("Volcano Plot: ", group_1, " vs ", group_2),
-       subtitle = "Test: Logistic Regression | Covariate: Sequencing Depth",
-       x = "Log2 Fold Change",
-       y = "-Log10 Adjusted P-value") +
-  
-  theme(plot.title = element_text(hjust = 0.5))
-
-# Save the plot
-ggsave(paste0("Volcano_LR_", group_1, "_vs_", group_2, ".png"), plot = p, width = 8, height = 6)
-print(p)
-
-message("Done! Results and plot saved.")
 ```

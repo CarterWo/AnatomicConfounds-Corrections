@@ -412,10 +412,9 @@ def _plot_figAB_combined(df, outdir, filename, ba_ylim=None, ba_xlim=None,
     # ── Panel 3: Dumbbell ────────────────────────────────────────────────────
     ax = axes[2]
     
-    # --- CHANGED: Filter to top 25 genes by absolute delta_logFC ---
+    # Top 25 genes by |delta_logFC|, then sorted by signed delta so dumbbells stack cleanly
     temp_df = sig_genes_df.copy()
     temp_df["abs_delta"] = temp_df["delta_logFC"].abs()
-    # Sort by delta_logFC after taking top 25 so the dumbbells stack cleanly
     sig_r = temp_df.nlargest(25, "abs_delta").sort_values("delta_logFC").reset_index(drop=True)
     
     ys_db     = list(range(len(sig_r)))
@@ -864,7 +863,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     sd_ba = df["delta_logFC"].std()
     lo_ba_A, hi_ba_A = mu_ba - 1.96 * sd_ba, mu_ba + 1.96 * sd_ba
     
-    # Changed from logFC_up to mean_logFC for the x margin
     x_margin_A2 = float(df.loc[colored, "mean_logFC"].abs().max()) * 1.5 if colored.sum() else 0.5
     if ba_xlim is not None:
         xlim_A2 = (-ba_xlim, ba_xlim)
@@ -877,7 +875,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
         y_margin_A2 = float(df.loc[colored, "delta_logFC"].abs().max()) * 1.20 if colored.sum() else 0.5
         ylim_A2 = (-y_margin_A2, y_margin_A2)
         
-    # Changed x-axis data to mean_logFC
     scatter_grey_rect(ax, df.loc[grey, "mean_logFC"], df.loc[grey, "delta_logFC"],
                       xlim_A2, ylim_A2, label=f"Neither (n={grey.sum()}, clipped)")
                       
@@ -886,7 +883,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
                            ("Sig in Both", C["both"], "Both")]:
         m = df["sig_cat"] == cat
         if m.sum():
-            # Changed x-axis data to mean_logFC
             ax.scatter(df.loc[m, "mean_logFC"], df.loc[m, "delta_logFC"],
                        color=col, alpha=0.92, s=24, edgecolors="none",
                        zorder=5, label=f"{lbl} (n={m.sum()})")
@@ -896,7 +892,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     ax.axhline(0, color="#555", lw=0.8, ls=":", alpha=0.7)
     ax.set_xlim(*xlim_A2); ax.set_ylim(*ylim_A2)
     
-    # Updated labels
     ax.set_xlabel("Mean logFC  [(G1 + G2) / 2]")
     ax.set_ylabel("\u0394 logFC  [G2 \u2212 G1]")
     ax.set_title(f"Bland-Altman\n"
@@ -907,7 +902,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     
     texts_A2 = []
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
-        # Changed filter and label reference to mean_logFC
         sub = df[(df["sig_cat"] == cat) & (df["mean_logFC"].abs() > 0.2)]
         texts_A2.extend(label_all(ax, sub, "mean_logFC", "delta_logFC", col=col))
         
@@ -1025,8 +1019,7 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     fig.tight_layout()
     fig.savefig(os.path.join(outdir, "figB_effect_size_shift.png"), dpi=160, bbox_inches="tight")
     plt.close(fig)
-# Ensure mean_logFC is calculated for the true Bland-Altman x-axis
-##############################################################################################################################
+
     plt.rcParams.update({
         "font.size": 15, "axes.titlesize": 17, "axes.labelsize": 15,
         "legend.fontsize": 13, "xtick.labelsize": 15, "ytick.labelsize": 15,
@@ -1054,7 +1047,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     sd_ba = df["delta_logFC"].std()
     lo_ba_A, hi_ba_A = mu_ba - 1.96 * sd_ba, mu_ba + 1.96 * sd_ba
     
-    # Use mean_logFC for limits
     x_margin_A2 = float(df.loc[colored, "mean_logFC"].abs().max()) * 1.5 if colored.sum() else 0.5
     if ba_xlim is not None:
         xlim_A2 = (-ba_xlim, ba_xlim)
@@ -1067,7 +1059,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
         y_margin_A2 = float(df.loc[colored, "delta_logFC"].abs().max()) * 1.20 if colored.sum() else 0.5
         ylim_A2 = (-y_margin_A2, y_margin_A2)
         
-    # Scatter using mean_logFC on X axis
     scatter_grey_rect(ax, df.loc[grey, "mean_logFC"], df.loc[grey, "delta_logFC"],
                       xlim_A2, ylim_A2, label=f"Neither (n={grey.sum()}, clipped)")
                       
@@ -1095,7 +1086,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     
     texts_A2 = []
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
-        # Filter and label reference to mean_logFC
         sub = df[(df["sig_cat"] == cat) & (df["mean_logFC"].abs() > 0.2)]
         texts_A2.extend(label_all(ax, sub, "mean_logFC", "delta_logFC", col=col))
         
@@ -1155,17 +1145,14 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     fig.tight_layout()
     fig.savefig(os.path.join(outdir, "figA_divergence.png"), dpi=160, bbox_inches="tight")
     plt.close(fig)
-####################################################################################################################################
-    # ==========================================
-    # FIGURE 2: Bland-Altman Plot
-    # ==========================================
+
+    # ── FIGURE 2 — Bland-Altman Plot ─────────────────────────────────────────
     fig2, ax = plt.subplots(1, 1, figsize=(7.5, 5.5))
 
     mu_ba = df["delta_logFC"].mean()
     sd_ba = df["delta_logFC"].std()
     lo_ba_A, hi_ba_A = mu_ba - 1.96 * sd_ba, mu_ba + 1.96 * sd_ba
     
-    # Changed from logFC_up to mean_logFC for the x margin
     x_margin_A2 = float(df.loc[colored, "mean_logFC"].abs().max()) * 1.5 if colored.sum() else 0.5
     if ba_xlim is not None:
         xlim_A2 = (-ba_xlim, ba_xlim)
@@ -1178,7 +1165,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
         y_margin_A2 = float(df.loc[colored, "delta_logFC"].abs().max()) * 1.20 if colored.sum() else 0.5
         ylim_A2 = (-y_margin_A2, y_margin_A2)
         
-    # Changed x-axis data to mean_logFC
     scatter_grey_rect(ax, df.loc[grey, "mean_logFC"], df.loc[grey, "delta_logFC"],
                       xlim_A2, ylim_A2, label=f"Neither (n={grey.sum()}, clipped)")
                       
@@ -1187,7 +1173,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
                            ("Sig in Both", C["both"], "Both")]:
         m = df["sig_cat"] == cat
         if m.sum():
-            # Changed x-axis data to mean_logFC
             ax.scatter(df.loc[m, "mean_logFC"], df.loc[m, "delta_logFC"],
                        color=col, alpha=0.92, s=24, edgecolors="none",
                        zorder=5, label=f"{lbl} (n={m.sum()})")
@@ -1197,7 +1182,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     ax.axhline(0, color="#555", lw=0.8, ls=":", alpha=0.7)
     ax.set_xlim(*xlim_A2); ax.set_ylim(*ylim_A2)
     
-    # Updated labels
     ax.set_xlabel("Mean logFC  [(G1 + G2) / 2]")
     ax.set_ylabel("\u0394 logFC  [G2 \u2212 G1]")
     ax.set_title(f"Bland-Altman\n"
@@ -1208,7 +1192,6 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
     
     texts_A2 = []
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
-        # Changed filter and label reference to mean_logFC
         sub = df[(df["sig_cat"] == cat) & (df["mean_logFC"].abs() > 0.2)]
         texts_A2.extend(label_all(ax, sub, "mean_logFC", "delta_logFC", col=col))
         
@@ -1465,7 +1448,7 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None,
         # Spearman r of -log10(p) values
         "spearman_r_neglogp": round(r_nla_sp, 4),
         "spearman_r_neglogp_top10": round(r_nla_sp_top10, 4) if not np.isnan(r_nla_sp_top10) else np.nan,
-        # Spearman r of logFC (kept for reference)
+        # Spearman r of logFC
         "spearman_r_lfc":  round(r_lfc_sp, 4),
         # MAB as % of mean |logFC|
         "mab_pct_all":     round(mab_pct_all, 2) if not np.isnan(mab_pct_all) else np.nan,

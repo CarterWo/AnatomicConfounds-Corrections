@@ -321,7 +321,7 @@ def _plot_figAB_combined(df, outdir, filename, ba_ylim=None, ba_xlim=None,
     top25_genes  = set(sig_genes_df["Gene"])
     colored = df["sig_cat"] != "Neither"
     grey    = ~colored
-#__________________________________________________________________________________________________________________________________________________________________
+
     fig, axes = plt.subplots(1, 4, figsize=(24, ab_y_axis),
                              gridspec_kw={"width_ratios": [0.9, 1.4, 1.0, 1.4]})
 
@@ -1120,7 +1120,7 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
         # Spearman r of -log10(p) values
         "spearman_r_neglogp": round(r_nla_sp, 4),
         "spearman_r_neglogp_top10": round(r_nla_sp_top10, 4) if not np.isnan(r_nla_sp_top10) else np.nan,
-        # Spearman r of logFC (kept for reference)
+        # Spearman r of logFC
         "spearman_r_lfc":  round(r_lfc_sp, 4),
         # MAB as % of mean |logFC|
         "mab_pct_all":     round(mab_pct_all, 2) if not np.isnan(mab_pct_all) else np.nan,
