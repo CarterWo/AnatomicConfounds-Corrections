@@ -379,8 +379,8 @@ def filter_and_normalize(
         adata_manip = adata_manip[:, adata_manip.var["NegPrb"].fillna(False) == False]
         adata_manip = adata_manip[:, adata_manip.var["FalseCode"].fillna(False) == False].copy()
         adata_manip = adata_manip[adata_manip.obs.pct_counts_NegPrb <= 10, :]
-        sc.pp.log1p(adata_manip)
         sc.pp.normalize_total(adata_manip, target_sum=count_normalization_target)
+        sc.pp.log1p(adata_manip)
         new_adatas.append(adata_manip)
     return new_adatas
 
