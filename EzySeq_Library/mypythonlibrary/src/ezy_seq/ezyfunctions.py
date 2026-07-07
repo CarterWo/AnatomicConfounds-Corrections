@@ -623,6 +623,315 @@ def set_region_abundance_by_FMT(
     return adata[sel_index].copy()
 
 
+def _budget_for(total_per_fmt, key, total_avail: int) -> int:
+    """Resolve a group's cell budget from `total_per_fmt` (int, dict, or None)."""
+    if isinstance(total_per_fmt, dict):
+        return int(min(total_per_fmt.get(key, total_avail), total_avail))
+    if isinstance(total_per_fmt, (int, np.integer)):
+        return int(min(total_per_fmt, total_avail))
+    return int(total_avail)
+
+
+def _allocate_group(row: pd.Series, tgt, t: int) -> pd.Series:
+    """
+    Turn availability + a target into per-region desired counts for a budget `t`.
+
+    `row` is region -> available count. `tgt` is a {region: count|fraction} dict
+    (or None). Specified regions hit their target; the leftover budget fills the
+    unspecified regions at their baseline proportions, everything capped at
+    availability and trimmed so the total never exceeds `t`.
+    """
+    baseline = (row / row.sum()).fillna(0)
+    desired = pd.Series(0, index=row.index, dtype=int)
+
+    if tgt:
+        is_count = all(isinstance(v, (int, np.integer)) for v in tgt.values())
+        if is_count:
+            for r, v in tgt.items():
+                if r in desired.index:
+                    desired[r] = int(v)
+        else:
+            frac_map = {r: float(v) for r, v in tgt.items() if r in desired.index}
+            sfrac = sum(frac_map.values())
+            if sfrac > 1.0:
+                frac_map = {r: v / sfrac for r, v in frac_map.items()}
+            for r, fr in frac_map.items():
+                desired[r] = int(round(fr * t))
+
+        desired = desired.clip(upper=row)
+        unspecified = [r for r in desired.index if r not in tgt]
+        remain = max(0, t - int(desired.sum()))
+        if unspecified and remain > 0:
+            caps_unspec = (row - desired).loc[unspecified].clip(lower=0)
+            desired.loc[unspecified] += _alloc_by_baseline_with_caps(
+                baseline.loc[unspecified], caps_unspec, remain
+            )
+    else:
+        desired = _alloc_by_baseline_with_caps(row, row.clip(lower=0), t)
+
+    while int(desired.sum()) > t:
+        biggest = desired.idxmax()
+        if desired[biggest] == 0:
+            break
+        desired[biggest] -= 1
+    return desired.clip(upper=row)
+
+
+def _sample_from_pool(sub, desired: pd.Series, region_col, rng) -> list:
+    """Randomly draw `desired[region]` obs-index labels from `sub` per region."""
+    out = []
+    for region, need in desired.items():
+        n = int(need)
+        if n <= 0:
+            continue
+        pool = sub.index[sub[region_col] == region].to_numpy()
+        out.extend(pool.tolist() if n >= len(pool) else
+                   rng.choice(pool, size=n, replace=False).tolist())
+    return out
+
+
+def _select_by_fmt_targets(avail, obs_rf, target_by_fmt, total_per_fmt,
+                           region_col, fmt_col, rng) -> set:
+    """
+    Pooled (FMT-wise) selection: all cells within each FMT group are pooled across
+    samples, then subsampled to hit that group's per-region targets on a single
+    per-FMT budget. Returns the selected obs-index labels as a set.
+    """
+    selected = []
+    for fmt in avail.index:
+        row = avail.loc[fmt]
+        t = _budget_for(total_per_fmt, fmt, int(row.sum()))
+        desired = _allocate_group(row, target_by_fmt.get(fmt), t)
+        sub = obs_rf[obs_rf[fmt_col] == fmt]
+        selected += _sample_from_pool(sub, desired, region_col, rng)
+    return set(selected)
+
+
+def _max_feasible_n(row: pd.Series, tgt) -> int:
+    """
+    Largest total cell count N a single sample can supply while hitting target `tgt`
+    exactly, with unspecified regions filled at baseline proportions.
+
+    For fraction targets, each specified region r constrains N <= avail_r / frac_r,
+    and the unspecified regions jointly constrain N <= (sum unspecified avail) /
+    (1 - sum specified fracs). Returns row.sum() for a None or count-based target.
+    """
+    total = int(row.sum())
+    if not tgt:
+        return total
+    if all(isinstance(v, (int, np.integer)) for v in tgt.values()):
+        return total  # explicit counts carry no fraction-based ceiling
+
+    frac = {r: float(v) for r, v in tgt.items() if r in row.index}
+    sf = sum(frac.values())
+    if sf > 1.0:
+        frac = {r: v / sf for r, v in frac.items()}
+
+    caps = [row[r] / f for r, f in frac.items() if f > 0]
+    spec = set(frac)
+    rem_frac = 1.0 - sum(frac.values())
+    if rem_frac > 1e-9:
+        unspec_avail = int(row[[r for r in row.index if r not in spec]].sum())
+        caps.append(unspec_avail / rem_frac)
+    return int(np.floor(min(caps))) if caps else total
+
+
+def _select_by_sample_targets(obs_rsf, target_by_fmt, total_per_fmt,
+                              region_col, fmt_col, sample_col, rng) -> set:
+    """
+    Per-sample selection with equal, maximised contribution.
+
+    Every sample is subsampled to its FMT's target fraction, and all samples in the
+    scenario contribute the *same* number of cells N. N is chosen as large as
+    possible subject to every sample being able to hit its target:
+
+        N = min over samples of `_max_feasible_n(sample, its FMT target)`
+
+    so one cell-poor sample sets the shared per-sample count. If `total_per_fmt` is
+    given it acts as an optional ceiling (N also <= budget // n_samples per FMT);
+    when None, N is the pure feasibility maximum. Returns the selected labels as a set.
+    """
+    avail = obs_rsf.groupby([fmt_col, sample_col, region_col]).size().unstack(fill_value=0)
+    fmts = list(avail.index.get_level_values(fmt_col).unique())
+
+    feasible = []           # (N_i, fmt, sample)
+    ceilings = []
+    for fmt in fmts:
+        fmt_block = avail.xs(fmt, level=fmt_col)          # rows=sample, cols=region
+        n_samp = max(1, len(fmt_block.index))
+        tgt = target_by_fmt.get(fmt)
+        for samp in fmt_block.index:
+            feasible.append((_max_feasible_n(fmt_block.loc[samp], tgt), fmt, samp))
+        if total_per_fmt is not None:
+            budget = _budget_for(total_per_fmt, fmt, int(fmt_block.values.sum()))
+            ceilings.append(budget // n_samp)
+
+    binding = min(feasible, key=lambda x: x[0])
+    N = binding[0]
+    if ceilings:
+        N = min(N, min(ceilings))
+    if N <= 0:
+        raise ValueError(
+            f"Max equal per-sample contribution is 0: sample {binding[2]!r} "
+            f"(FMT {binding[1]!r}) cannot reach its target fraction. "
+            f"Lower `dev` or use balance='fmt'."
+        )
+    print(f"[sample-balanced] N={N} cells/sample x {len(feasible)} samples "
+          f"(limited by {binding[2]!r} in FMT {binding[1]!r}, max feasible {binding[0]})")
+
+    selected = []
+    for fmt in fmts:
+        fmt_block = avail.xs(fmt, level=fmt_col)
+        tgt = target_by_fmt.get(fmt)
+        for samp in fmt_block.index:
+            desired = _allocate_group(fmt_block.loc[samp], tgt, N)
+            sub = obs_rsf[(obs_rsf[fmt_col] == fmt) & (obs_rsf[sample_col] == samp)]
+            selected += _sample_from_pool(sub, desired, region_col, rng)
+    return set(selected)
+
+
+def tag_region_abundance_by_FMT(
+    adata,
+    dev,
+    random_state=0,
+    total_per_fmt=None,
+    region_of_interest: str = "Cortex",
+    up_fmt: str = "Stroke_FMT",
+    down_fmt: str = "Healthy_FMT",
+    region_col: str = "napari_region",
+    fmt_col: str = "FMT",
+    sample_col: str = "sample_ID",
+    balance: str = "fmt",
+    col_prefixes: tuple[str, str] = ("G1", "G2"),
+    copy: bool = False,
+):
+    """
+    Composition-engineering (in-place tagging variant of `set_region_abundance_by_FMT`).
+
+    Instead of subsampling into two separate AnnData objects, this builds a matched
+    pair of opposite composition scenarios and records each one as a boolean column
+    on `adata.obs`, so a single object carries every engineered subset.
+
+    The `region_of_interest` (default 'Cortex') target proportions are derived from
+    its cross-sample distribution:
+
+        hi = mean + dev * SD
+        lo = max(0, mean - dev * SD)
+
+    where mean/SD are taken over the per-sample region fractions. `dev` replaces the
+    previously hard-coded 1-SD shift, so `dev=1` reproduces the original ±1 SD design.
+    The two scenarios are:
+
+        G1 : up_fmt   -> hi,   down_fmt -> lo
+        G2 : up_fmt   -> lo,   down_fmt -> hi
+
+    `balance` controls how cells are drawn to hit those targets (the targets
+    themselves are always the FMT-level fractions above):
+
+    - ``"fmt"`` (default): pool all of a group's cells across samples and subsample
+      once to the group target, on a per-FMT budget. Sample identity is ignored, so
+      a scenario can draw disproportionately from one sample.
+    - ``"sample"``: subsample each sample independently to the same target, and give
+      every sample the *same* cell count N. N is maximised subject to feasibility --
+      the largest count every sample can hit at its target (one cell-poor sample sets
+      it for all). `total_per_fmt` is then an optional ceiling, not required.
+
+    In both modes, non-target regions are filled at baseline proportions and any FMT
+    group not named by `up_fmt`/`down_fmt` simply keeps its baseline mix.
+
+    Parameters
+    ----------
+    adata : AnnData
+    dev : float
+        Magnitude of the shift in standard deviations of the region-of-interest
+        fraction. `dev=1` matches the original ±1 SD experiment.
+    random_state : int | None
+        RNG seed. Each scenario is drawn from its own `default_rng(random_state)`,
+        so results are reproducible and independent of evaluation order (matching the
+        prior pattern of calling the subsampling function twice with the same seed).
+        Also embedded in the output column names.
+    total_per_fmt : int | dict[str, int] | None
+        Per-FMT cell budget when balance='fmt' (defaults to all available cells).
+        When balance='sample' it is only an optional ceiling on the maximised
+        per-sample count (N <= budget // n_samples per FMT); None means no ceiling.
+    region_of_interest : str
+        Region whose abundance is shifted (default 'Cortex').
+    up_fmt, down_fmt : str
+        FMT groups enriched/depleted in G1 (reversed in G2). Defaults
+        'Stroke_FMT'/'Healthy_FMT' match the manuscript.
+    region_col, fmt_col, sample_col : str
+        obs columns for region, treatment group, and biological sample.
+    balance : {"fmt", "sample"}
+        Draw cells pooled per FMT (default) or independently per sample. See above.
+    col_prefixes : (str, str)
+        Prefixes for the two output columns (default ('G1', 'G2')).
+    copy : bool
+        If True, operate on and return a copy; otherwise tag `adata` in place.
+
+    Returns
+    -------
+    AnnData
+        The tagged object with two new boolean obs columns:
+        ``{col_prefixes[0]}_{seed}_{dev}`` and ``{col_prefixes[1]}_{seed}_{dev}``
+        (e.g. ``G1_0_1`` / ``G2_0_1``). `dev` is formatted compactly, so a
+        fractional shift like 0.5 yields ``G1_0_0.5`` (bracket-access the column,
+        since the dot blocks attribute access).
+    """
+    if balance not in ("fmt", "sample"):
+        raise ValueError("balance must be 'fmt' or 'sample'.")
+
+    adata = adata.copy() if copy else adata
+
+    for col in (region_col, fmt_col, sample_col):
+        if col not in adata.obs:
+            raise KeyError(f"{col!r} not found in adata.obs")
+
+    # Cross-sample mean/SD of the region-of-interest fraction.
+    counts_ps = adata.obs.groupby([sample_col, region_col]).size().unstack(fill_value=0)
+    if region_of_interest not in counts_ps.columns:
+        raise KeyError(
+            f"region_of_interest {region_of_interest!r} not found in {region_col!r} "
+            f"categories: {list(counts_ps.columns)}"
+        )
+    fracs_ps = counts_ps.div(counts_ps.sum(axis=1), axis=0)
+    roi_mean = float(fracs_ps[region_of_interest].mean())
+    roi_std  = float(fracs_ps[region_of_interest].std())
+    hi = roi_mean + dev * roi_std
+    lo = max(0.0, roi_mean - dev * roi_std)
+
+    target_g1 = {up_fmt: {region_of_interest: hi}, down_fmt: {region_of_interest: lo}}
+    target_g2 = {up_fmt: {region_of_interest: lo}, down_fmt: {region_of_interest: hi}}
+
+    if balance == "fmt":
+        obs_rf = adata.obs[[region_col, fmt_col]].dropna().copy()
+        avail = obs_rf.groupby([fmt_col, region_col]).size().unstack(fill_value=0)
+        select = lambda tgt: _select_by_fmt_targets(
+            avail, obs_rf, tgt, total_per_fmt, region_col, fmt_col,
+            np.random.default_rng(random_state))
+    else:  # "sample"
+        obs_rsf = adata.obs[[region_col, fmt_col, sample_col]].dropna().copy()
+        select = lambda tgt: _select_by_sample_targets(
+            obs_rsf, tgt, total_per_fmt, region_col, fmt_col, sample_col,
+            np.random.default_rng(random_state))
+
+    sel_g1 = select(target_g1)
+    sel_g2 = select(target_g2)
+    if not sel_g1 or not sel_g2:
+        raise ValueError("No cells selected for one or both scenarios.")
+
+    seed_tag = random_state if random_state is not None else "None"
+    g1_col = f"{col_prefixes[0]}_{seed_tag}_{dev:g}"
+    g2_col = f"{col_prefixes[1]}_{seed_tag}_{dev:g}"
+    adata.obs[g1_col] = adata.obs_names.isin(sel_g1)
+    adata.obs[g2_col] = adata.obs_names.isin(sel_g2)
+
+    print(f"{region_of_interest} fraction: mean={roi_mean:.4f}, SD={roi_std:.4f} "
+          f"-> hi={hi:.4f}, lo={lo:.4f} (dev={dev:g})")
+    print(f"Tagged {int(adata.obs[g1_col].sum())} cells -> {g1_col!r}; "
+          f"{int(adata.obs[g2_col].sum())} cells -> {g2_col!r}")
+    return adata
+
+
 def impact_metrics(naive_df, anat_df, region_markers: set, alpha=0.05):
     """
     Compare a naive (pooled) DE result against an anatomy-aware result.

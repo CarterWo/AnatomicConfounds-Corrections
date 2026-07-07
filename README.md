@@ -74,10 +74,12 @@ adata_full.obs['ct_quint_region']  = adata_full.obs['ct_simple'] + "_" + adata_f
 
 **1f. Composition-engineering experiment**
 ```python
-cortex_up   = ezy.set_region_abundance_by_FMT(adata_full, target_by_Cortex_up,   total_per_fmt=125000)
-cortex_down = ezy.set_region_abundance_by_FMT(adata_full, target_by_Cortex_down, total_per_fmt=125000)
+ezy.tag_region_abundance_by_FMT(adata_full, dev=1, random_state=0, balance="sample")
+# -> boolean obs columns 'G1_0_1' (cortex-up) and 'G2_0_1' (cortex-down)
 ```
-Cells are randomly subsampled per treatment group to shift isocortex proportion to +1 SD or −1 SD of the cross-sample mean, while redistributing the remaining cell budget across non-cortex regions proportionally. Target proportions are defined inline in `Pre_DE_processing.ipynb`.
+`tag_region_abundance_by_FMT` shifts the isocortex proportion to +dev·SD or −dev·SD of the cross-sample mean (`dev=1` reproduces the original ±1 SD), redistributing the remaining cell budget across non-cortex regions proportionally. Rather than returning subsampled objects, it tags each cell's membership in the two opposite scenarios (G1/G2) as boolean columns named `G1_{seed}_{dev}` / `G2_{seed}_{dev}`. With `balance="sample"` each sample is subsampled independently to the same maximised on-target cell count; `balance="fmt"` pools cells within each treatment group instead. The engineered subsets are then exported via the masks, e.g. `adata_full[adata_full.obs['G1_0_1']]`.
+
+The original `ezy.set_region_abundance_by_FMT(adata, target_by_fmt, total_per_fmt)`, which takes explicit target dicts and returns a subsampled AnnData, remains available.
 
 
 ---
@@ -151,6 +153,7 @@ Mean Absolute Bias (MAB) and Bias Ratio metrics are computed via `ezy.impact_met
 | `ezy.filter_and_normalize(adatas, min_gene_cnt, min_t_cnt)` | Filter by gene/transcript counts, log-normalize |
 | `ezy.combine_adatas(out_path, adatas)` | Concatenate and save AnnData list |
 | `ezy.set_region_abundance_by_FMT(adata, target_by_fmt, total_per_fmt)` | Composition-engineering: subsample to target regional proportions per treatment group |
+| `ezy.tag_region_abundance_by_FMT(adata, dev, random_state, balance)` | Composition-engineering: tag G1/G2 boolean columns for ±dev·SD cortex-shift scenarios (per-sample or pooled) |
 | `ezy.rank_DE(adata, groupby, comparisons)` | Wilcoxon DE across one or more group pairs |
 | `ezy.impact_metrics(naive_df, anat_df, region_markers)` | MAB and Bias Ratio: quantify anatomical label contribution to DE |
 | `ezy.plot.volcano(de_df, ...)` | Volcano plot with optional gene labeling |
