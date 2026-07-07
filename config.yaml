@@ -1,0 +1,87 @@
+# ============================================================================
+# Pipeline configuration — fill in the absolute paths for YOUR machine.
+#
+# Centralizes every path that Pre_processing/Pre_DE_processing.ipynb otherwise
+# hardcodes. Edit the values below, then load in the notebook with:
+#
+#     import yaml
+#     cfg = yaml.safe_load(open("config.yaml"))
+#     CosMx_Export_Path = cfg["inputs"]["cosmx_export_dir"]
+#     ...
+#
+# Notes
+# -----
+# - Use forward slashes even on Windows (C:/data/...); they avoid backslash
+#   escaping and work fine in Python.
+# - The large raw data are not in this repo — download from Zenodo
+#   (https://doi.org/10.5281/zenodo.19923648) and point `cosmx_export_dir` at it.
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# RAW / INPUT DATA  — the pipeline's initial inputs (README "Step 1")
+# ---------------------------------------------------------------------------
+inputs:
+
+  # Root of the raw CosMx SMI export. Walked by ezy.load.cosmx(); must contain
+  # per-slide `flatFiles/` folders holding (each may be gzipped .gz):
+  #   {name}_exprMat_file.csv        counts matrix (cells x genes)
+  #   {name}_fov_positions_file.csv  FOV stage positions
+  #   {name}_metadata_file.csv       per-cell metadata + cell_type + coords
+  cosmx_export_dir: "path/to/CosMx/Export"
+
+  # Sample-metadata workbook (ships in this repo root as sample_info.xlsx).
+  # Read by ezy.read_dictionary(); needs a 'sample_metadata' sheet
+  # (slide_ID, sample_ID, FMT / Treatment, ...) and an optional 'sub_regions' sheet.
+  sample_info_xlsx: "path/to/sample_info.xlsx"
+
+  # Napari polygon CSVs that assign SAMPLE identity when multiple samples share
+  # one slide. Layout:  <dir>/<slide_ID>/<sample_ID>.csv
+  # (each CSV has axis-0 / axis-1 vertex columns grouped by an 'index' column).
+  napari_sample_polygons_dir: "path/to/napari/sample_polygons"
+
+  # Napari polygon CSVs that assign anatomical REGION labels -> obs['napari_region']
+  # (Cortex, Hippocampus, Striatum, ...). Layout:  <dir>/<slide_ID>/<Region>.csv
+  # Committed copies of these live under Final_Data/Polygons/.
+  napari_region_polygons_dir: "path/to/napari/region_polygons"
+
+  # QUINT colour key workbook (Color_key.xlsm): R/G/B -> region-name lookup used by
+  # Quint_Scripts/Quint_Pipeline.Rmd to translate atlas pixel colours to regions.
+  quint_color_key_xlsm: "path/to/quint/Color_key.xlsm"
+
+  # QUINT atlas region labels exported from Quint_Scripts/Quint_Pipeline.Rmd
+  # (single CSV with a 'quint_region' column indexed by cell). This is produced
+  # MID-pipeline by the QUINT (R) step; leave as a placeholder until then.
+  quint_labels_csv: "path/to/quint_output.csv"
+
+# ---------------------------------------------------------------------------
+# INTERMEDIATE  — artifacts produced and re-read within a step
+# ---------------------------------------------------------------------------
+intermediate:
+
+  # Folder where Quint_Pipeline.Rmd writes the pseudo-histology / segmentation
+  # PNGs, feeds them to QUINT/QuickNII/VisuAlign, and reads the atlas images back.
+  quint_images_dir: "path/to/quint_images"
+
+# ---------------------------------------------------------------------------
+# OUTPUTS / INTERMEDIATE  — where the pipeline writes
+# ---------------------------------------------------------------------------
+outputs:
+
+  # Assembled, annotated, normalized AnnData written by the preprocessing step.
+  adata_h5ad: "path/to/output/adata.h5ad"
+
+  # CSV export of the full object handed to the QUINT (R) atlas-labeling step.
+  quint_export_dir: "path/to/output/seurat_export"
+
+  # CSV exports consumed by the R differential-expression notebooks.
+  #   base -> full analysis cohort
+  #   up   -> G1 composition-engineered subset (cortex-up)
+  #   down -> G2 composition-engineered subset (cortex-down)
+  de_export_base: "path/to/output/DE_csv_folder/base"
+  de_export_up:   "path/to/output/DE_csv_folder/up"
+  de_export_down: "path/to/output/DE_csv_folder/down"
+
+  # Root for the differential-expression model result CSVs written by the R
+  # notebooks. DE_Base_Analysis writes to <lmm_results_dir>/base/{Global_CT_Analysis,
+  # Local_Regional_Analysis,Pseudobulk_Validation}; LMM_all writes under the root.
+  lmm_results_dir: "path/to/output/lmm_outputs"

@@ -12,6 +12,20 @@ library(Seurat)
 library("CrossExpression")
 library(Matrix)
 library(readxl)
+library(yaml)
+
+# -- Load pipeline paths from config.yaml (searches up from the working dir) --
+find_config <- function(name = "config.yaml", start = getwd()) {
+  d <- normalizePath(start, winslash = "/", mustWork = FALSE)
+  repeat {
+    p <- file.path(d, name)
+    if (file.exists(p)) return(p)
+    parent <- dirname(d)
+    if (identical(parent, d)) stop(paste0(name, " not found in ", start, " or any parent dir"))
+    d <- parent
+  }
+}
+cfg_paths <- yaml::read_yaml(find_config())
 ```
 
 
@@ -78,7 +92,7 @@ getwd()
 
 
 
-cfg_file<-make_cfg("/path/to/csvs")
+cfg_file<-make_cfg(cfg_paths$outputs$quint_export_dir)
 
 #cfg_file<-make_cfg("/path/to/csvs")
 
@@ -92,7 +106,7 @@ seurat_obj<-build_seurat_from_folder(cfg_file)
 
 cluster_name<-'call_type_column'
 sample_vec <- unique(seurat_obj$sample_ID)
-out_dir <- paste0("/path/to/quint_images")
+out_dir <- cfg_paths$intermediate$quint_images_dir
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 for (i in seq_along(sample_vec)) {
 
@@ -205,7 +219,7 @@ sample_vec <- unique(seurat_obj$sample_ID)#may require customization to match or
 color_codes <- list()
 plots <- list()
 for (i in seq_along(sample_vec)){
-  fp <- paste0("/path/to/quint_images/segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
+  fp <- file.path(cfg_paths$intermediate$quint_images_dir, paste0("segmentation_cells_",sample_vec[[i]],"_s00",i,".png"))
   #fp <- paste0("/path/to/quint_images/Output/Images/Probiotics_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
   message(fp)
   message(sample_vec[[i]])
@@ -452,7 +466,7 @@ print(frequency_table)
 
 # Cntrl Ahift M %>% 
 # Alt + - <- 
-labels_path <- "/path/to/quint/Color_key.xlsm"
+labels_path <- cfg_paths$inputs$quint_color_key_xlsm
 
 labels <- read_excel(
   labels_path, sheet=1
@@ -476,7 +490,7 @@ lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
 # ==============================================================================
 
 
-labels_path <- "/path/to/quint/Color_key.xlsm"
+labels_path <- cfg_paths$inputs$quint_color_key_xlsm
 
 labels <- read_excel(
   labels_path, sheet=1
@@ -505,7 +519,7 @@ seurat_obj@meta.data <- seurat_obj@meta.data %>%
 ```{r}
 write.csv(
   data.frame(quint_region = seurat_obj$quint_region),
-  file = "/path/to/quint_output.csv",
+  file = cfg_paths$inputs$quint_labels_csv,
   row.names = TRUE
 )
 ```
