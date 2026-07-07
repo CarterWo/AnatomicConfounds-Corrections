@@ -77,7 +77,7 @@ adata_full.obs['ct_quint_region']  = adata_full.obs['ct_simple'] + "_" + adata_f
 ezy.tag_region_abundance_by_FMT(adata_full, dev=1, random_state=0, balance="sample")
 # -> boolean obs columns 'G1_0_1' (cortex-up) and 'G2_0_1' (cortex-down)
 ```
-`tag_region_abundance_by_FMT` shifts the isocortex proportion to +dev·SD or −dev·SD of the cross-sample mean (`dev=1` reproduces the original ±1 SD), redistributing the remaining cell budget across non-cortex regions proportionally. Rather than returning subsampled objects, it tags each cell's membership in the two opposite scenarios (G1/G2) as boolean columns named `G1_{seed}_{dev}` / `G2_{seed}_{dev}`. With `balance="sample"` each sample is subsampled independently to the same maximised on-target cell count; `balance="fmt"` pools cells within each treatment group instead. The engineered subsets are then exported via the masks, e.g. `adata_full[adata_full.obs['G1_0_1']]`.
+`tag_region_abundance_by_FMT` shifts the isocortex proportion to +dev·SD or −dev·SD of the cross-sample mean (`dev=1` reproduces the original ±1 SD), redistributing the remaining cell budget across non-cortex regions proportionally. Rather than returning subsampled objects, it tags each cell's membership in the two opposite scenarios (G1/G2) as boolean columns named `G1_{seed}_{dev}` / `G2_{seed}_{dev}`. With `balance="sample"` each sample is subsampled independently to the same maximised on-target cell count; `balance="fmt"` pools cells within each treatment group instead. Only the full cohort is exported for DE (the `G1_*`/`G2_*` masks ride along in `cell_metadata.csv`); the DE script `LMM_all.ipynb` reconstructs the cortex-up / cortex-down subsets from those masks rather than reading separate CSV folders.
 
 The original `ezy.set_region_abundance_by_FMT(adata, target_by_fmt, total_per_fmt)`, which takes explicit target dicts and returns a subsampled AnnData, remains available.
 
@@ -106,7 +106,7 @@ Two notebooks run DE on different datasets:
 | Notebook | Dataset | Purpose |
 |----------|---------|---------|
 | `DE_scripts/DE_Base_Analysis.ipynb` | Standard dataset | Primary DE results → feeds post-hoc comparison |
-| `DE_scripts/LMM_all.ipynb` | Composition-engineered subsets (`cortex_up`, `cortex_down`) | Quantify anatomical composition effects |
+| `DE_scripts/LMM_all.ipynb` | Composition-engineered subsets (`cortex_up`, `cortex_down`), derived in-script from the full export's `G1_*`/`G2_*` masks | Quantify anatomical composition effects |
 
 Both notebooks run in an **R kernel** and implement four models:
 

@@ -73,13 +73,11 @@ outputs:
   # CSV export of the full object handed to the QUINT (R) atlas-labeling step.
   quint_export_dir: "path/to/output/seurat_export"
 
-  # CSV exports consumed by the R differential-expression notebooks.
-  #   base -> full analysis cohort
-  #   up   -> G1 composition-engineered subset (cortex-up)
-  #   down -> G2 composition-engineered subset (cortex-down)
+  # CSV export of the full analysis cohort, consumed by BOTH R differential-
+  # expression notebooks. DE_Base_Analysis uses it directly; LMM_all derives the
+  # composition-engineered subsets from the per-cell G1/G2 masks carried in
+  # cell_metadata.csv (no separate up/down folders are exported anymore).
   de_export_base: "path/to/output/DE_csv_folder/base"
-  de_export_up:   "path/to/output/DE_csv_folder/up"
-  de_export_down: "path/to/output/DE_csv_folder/down"
 
   # Root for the differential-expression model result CSVs written by the R
   # notebooks. DE_Base_Analysis writes to <lmm_results_dir>/base/{Global_CT_Analysis,
