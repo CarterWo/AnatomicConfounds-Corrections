@@ -54,3 +54,12 @@ tasks that hit transient HPC failures (timeouts, port-collision races) during
 the original submissions — kept for reproducibility of exactly what was run,
 not meant as general-purpose entry points. `*.sbatch` files also hardcode this
 project's own HPC account paths and will need adjusting for your own cluster.
+
+## Results
+
+`results/g1_g2_comparison_summary_dev{0.5,1.0,1.5,2.0,3.0}.csv` are the final
+DEG-overlap / logFC & significance-correlation / bias comparisons between the
+two composition-engineered pseudo-groups, across a composition-imbalance
+magnitude sweep on the 4-animal (ezy_seq-fixed) pipeline — the current,
+authoritative independent-platform validation numbers referenced in the
+manuscript and response letter.

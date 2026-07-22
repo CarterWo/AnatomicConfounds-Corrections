@@ -41,6 +41,21 @@ than a re-implementation of it.)
 
 ## Results
 
-`results/*.csv` are the final, cell-type-aware (50 seeds/scenario) scoring
-summaries referenced in the manuscript and response letter. See each script's
-header comment for exactly which analysis produced which file.
+`results/*_ezyseq_final.csv` (50 seeds/scenario, cell-type-aware, using
+Carter's real composition-engineering selection engine) are the final scoring
+summaries referenced in the manuscript and response letter:
+
+- `simulation_scoring_summary_ezyseq_final.csv` /
+  `per_seed_simulation_scoring_summary_ezyseq_final.csv` — main 4-scenario
+  array (also includes the exploratory `dream_interaction` model).
+- `dev_sweep_scoring_summary_ezyseq_final.csv` /
+  `per_seed_dev_sweep_scoring_summary_ezyseq_final.csv` — composition-
+  imbalance magnitude sweep (0.5x-2.0x; the 1.0x point is pulled from the
+  main array above, not re-run separately).
+- `stratified_scoring_ezyseq_final_{combined,per_region}_{summary,per_seed}.csv`
+  — per-region-stratified vs. LMM/interaction-model comparison.
+
+An earlier, now-superseded scoring pass (pre-dating a fix to the composition-
+engineering step, see root `CLAUDE.md` "we really messed up" entry,
+2026-07-20) is NOT included here to avoid ambiguity about which numbers are
+authoritative — only the `_ezyseq_final` files are current.
