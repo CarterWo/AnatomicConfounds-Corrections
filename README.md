@@ -18,9 +18,14 @@ The pipeline runs over **two independent datasets ("frameworks")** — see [Two 
 ├── Quint_Scripts/           # Quint atlas region assignment (R)
 │   └── QUINT_atlas_maps/{genotype,fmt}/   # per-framework segmentation maps
 ├── napari_definitions/{genotype,fmt}/     # per-framework Napari sample/region polygons
+├── Simulation/              # Ground-truth splatter simulation (FDR/power/bias validation)
+├── IndependentValidation/   # Cross-platform validation on Zhuang-ABCA-1-4 (MERFISH)
 ├── config.yaml              # per-framework paths + composition settings
 └── Final_Data/              # Processed outputs (large files on Zenodo)
 ```
+
+`Simulation/` and `IndependentValidation/` are reviewer-response deliverables,
+not part of the main CosMx pipeline above — see each folder's own README.
 
 Per-framework outputs land in labelled folders so the two datasets never
 overwrite each other: `Final_Data/<fw>/`, `csvs/<fw>/`, `LMM_output/<fw>/`.
