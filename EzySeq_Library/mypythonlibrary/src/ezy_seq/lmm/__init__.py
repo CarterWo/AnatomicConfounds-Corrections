@@ -378,13 +378,23 @@ def standardize_columns(df: pd.DataFrame, model_type: str) -> pd.DataFrame:
     pd.DataFrame with standardized column names.
     """
     df = df.copy()
-    if model_type.lower() == "pseudobulk":
+    mt = model_type.lower()
+    if mt == "pseudobulk":
         df = df.rename(columns={
             "log2FoldChange": "logFC",
             "pvalue":         "P.Value",
             "padj":           "adj.P.Val",
         })
-    elif model_type.lower() not in ["dream", "seurat"]:
+    elif mt in ("seurat", "wilcoxon", "wilcox"):
+        # Seurat FindMarkers output (Wilcoxon / LR): p_val, avg_log2FC, p_val_adj.
+        # avg_log2FC is already log2, matching Dream's logFC and DESeq2's
+        # log2FoldChange, so this is a pure rename (no base conversion).
+        df = df.rename(columns={
+            "avg_log2FC": "logFC",
+            "p_val":      "P.Value",
+            "p_val_adj":  "adj.P.Val",
+        })
+    elif mt != "dream":
         warnings.warn(f"Unknown model type: {model_type}. No column renaming applied.")
     return df
 
@@ -447,14 +457,25 @@ def parse_de_filename(filename: str) -> Optional[Dict[str, str]]:
             rest = rest[: -len(f"_{ann}")]
             break
 
+    # Map the filename model token to a canonical model name. The two cell-level
+    # Seurat FindMarkers tests share the Seurat column schema (see
+    # standardize_columns) but keep distinct identities so the figure scripts can
+    # filter on them: the Wilcoxon test (file token "wilcox") -> "wilcoxon", and
+    # the logistic-regression test (token "LR") -> "seurat". "seaurat" is a legacy
+    # misspelling of "seurat".
+    _MODEL_ALIAS = {"seaurat": "seurat", "wilcox": "wilcoxon", "LR": "seurat"}
     model = None
-    for mod in ["dream", "seurat", "seaurat", "wilcoxon"]:
+    for mod in ["dream", "seurat", "seaurat", "wilcoxon", "wilcox", "LR"]:
         if rest.endswith(f"_{mod}"):
-            model = "seurat" if mod == "seaurat" else mod
+            model = _MODEL_ALIAS.get(mod, mod)
             rest  = rest[: -len(f"_{mod}")]
             break
 
-    if model is None or annotation is None:
+    if model is None:
+        return None
+    # The region-blind Wilcoxon baseline legitimately has no annotation; every
+    # other model must have parsed one.
+    if annotation is None and model != "wilcoxon":
         return None
 
     return {"direction": direction, "cell_type": rest, "model": model, "annotation": annotation}
@@ -822,3 +843,179 @@ def create_annotation_summary_table(
                     print(f"Error processing {model}/{cell_type}/{pair_name}: {e}")
 
     return pd.DataFrame(rows)
+
+
+# =============================================================================
+# SEED AGGREGATION  (composition-engineering iterations)
+# =============================================================================
+
+def aggregate_seed_files(
+    files: List[Path],
+    model_type: str,
+    alpha: float = 0.05,
+    gene_col: str = "Gene",
+) -> pd.DataFrame:
+    """
+    Collapse a set of per-seed DE result files into one per-gene summary.
+
+    All ``files`` must be the *same* analysis (identical direction / cell type /
+    model / annotation) differing only by composition-engineering iteration
+    (``seed``). Because those seeds are re-subsamples of the SAME cells they are
+    NOT independent replicates, so their p-values must not be pooled with
+    Fisher / Stouffer (that would treat correlated draws as independent and
+    massively inflate significance). Instead we summarise the DISTRIBUTION of
+    each gene's estimate across seeds:
+
+    - effect size        : mean / median / SD of logFC and a 2.5-97.5% empirical
+                           band (the composition-induced spread of the effect);
+    - selection frequency: fraction of seeds calling the gene significant
+                           (``adj.P.Val < alpha``) -- how robust the DE call is
+                           to composition;
+    - direction stability: fraction of seeds agreeing on the dominant logFC sign;
+    - representative p    : median P.Value / adj.P.Val (a location summary of the
+                           distribution, NOT a combined test).
+
+    The result keeps the standard schema (``logFC`` = across-seed mean, and
+    ``P.Value`` / ``adj.P.Val`` = medians) so it drops straight into the existing
+    per-file visualisations, and adds the stability columns ``n_seeds``,
+    ``present_frac``, ``logFC_median``, ``logFC_sd``, ``logFC_lo``, ``logFC_hi``,
+    ``sig_frac`` and ``dir_consistency``.
+
+    Parameters
+    ----------
+    files : list of Path
+        Per-seed CSVs for one analysis (e.g. every
+        ``seed_*/.../UP_WHOLE_dream_napari.csv`` within one ``dev_*`` folder).
+    model_type : str
+        'pseudobulk', 'dream', or 'seurat' -- passed to standardize_columns().
+    alpha : float
+        Significance threshold for the selection-frequency metric.
+    gene_col : str
+        Gene identifier column (default 'Gene').
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per gene, sorted by the aggregated adj.P.Val (then P.Value).
+    """
+    if not files:
+        return pd.DataFrame()
+
+    cols = [gene_col, "logFC", "P.Value", "adj.P.Val"]
+    frames = []
+    for fp in files:
+        df = standardize_columns(load_de_file(fp), model_type)
+        frames.append(df[[c for c in cols if c in df.columns]])
+    n_files = len(frames)
+    long = pd.concat(frames, ignore_index=True)
+    if gene_col not in long.columns:
+        raise KeyError(f"{gene_col!r} column missing from the seed files")
+
+    has_p    = "P.Value"   in long.columns
+    has_padj = "adj.P.Val" in long.columns
+
+    rows = []
+    for gene, g in long.groupby(gene_col):
+        lfc     = g["logFC"].astype(float)
+        n       = int(len(g))
+        n_valid = int(lfc.notna().sum())
+        padj = g["adj.P.Val"].astype(float) if has_padj else None
+        pval = g["P.Value"].astype(float)   if has_p    else None
+        rows.append({
+            gene_col:          gene,
+            "logFC":           float(np.nanmean(lfc))               if n_valid else np.nan,
+            "P.Value":         float(np.nanmedian(pval))            if (has_p and n_valid)    else np.nan,
+            "adj.P.Val":       float(np.nanmedian(padj))            if (has_padj and n_valid) else np.nan,
+            "n_seeds":         n,
+            "present_frac":    n / n_files,
+            "logFC_median":    float(np.nanmedian(lfc))             if n_valid else np.nan,
+            "logFC_sd":        float(np.nanstd(lfc, ddof=1))        if n_valid > 1 else 0.0,
+            "logFC_lo":        float(np.nanpercentile(lfc, 2.5))    if n_valid else np.nan,
+            "logFC_hi":        float(np.nanpercentile(lfc, 97.5))   if n_valid else np.nan,
+            "sig_frac":        float((padj < alpha).mean())         if has_padj else np.nan,
+            "dir_consistency": float(max((lfc > 0).mean(), (lfc < 0).mean())) if n_valid else np.nan,
+        })
+
+    out = pd.DataFrame(rows)
+    sort_key = "adj.P.Val" if has_padj else ("P.Value" if has_p else gene_col)
+    return out.sort_values(sort_key, na_position="last").reset_index(drop=True)
+
+
+def aggregate_seed_directory(
+    results_root: Path,
+    out_root: Optional[Path] = None,
+    subdirs: Tuple[str, ...] = ("Pseudobulk_Validation",
+                                "Local_Regional_Analysis",
+                                "Global_CT_Analysis",
+                                "SingleCell_Tests"),
+    alpha: float = 0.05,
+    verbose: bool = True,
+) -> Dict[str, int]:
+    """
+    Aggregate every per-seed DE result under ``results_root`` across iterations.
+
+    Expects the ``LMM_all.ipynb`` layout::
+
+        <results_root>/dev_<dev>/seed_<seed>/<subdir>/<file>.csv
+
+    Within one ``dev_<dev>`` folder the same analysis writes an identically named
+    file in every ``seed_<seed>`` folder (the seed lives in the folder, not the
+    filename), so files are grouped by name and collapsed with
+    ``aggregate_seed_files``. DESeq2 groups span all tagged seeds (e.g. 100)
+    while the Dream LMM groups span only the seeds it ran (e.g. 3). Aggregated
+    results mirror the layout one level up::
+
+        <out_root>/dev_<dev>/<subdir>/<file>.csv
+
+    Parameters
+    ----------
+    results_root : Path
+        The DE results root (config ``outputs.lmm_results_dir``).
+    out_root : Path, optional
+        Where to write aggregates (default ``<results_root>/aggregated``).
+    subdirs : tuple of str
+        Per-iteration analysis subfolders to scan.
+    alpha : float
+        Significance threshold forwarded to ``aggregate_seed_files``.
+
+    Returns
+    -------
+    dict
+        Maps each written ``dev_<dev>/<subdir>/<file>`` to its seed count.
+    """
+    from collections import defaultdict
+
+    results_root = Path(results_root)
+    out_root = Path(out_root) if out_root is not None else results_root / "aggregated"
+
+    written: Dict[str, int] = {}
+    dev_dirs = sorted(d for d in results_root.glob("dev_*") if d.is_dir())
+    if not dev_dirs and verbose:
+        print(f"No dev_* folders found under {results_root}")
+
+    for dev_dir in dev_dirs:
+        for sub in subdirs:
+            groups: Dict[str, List[Path]] = defaultdict(list)
+            for seed_dir in sorted(dev_dir.glob("seed_*")):
+                sub_dir = seed_dir / sub
+                if not sub_dir.is_dir():
+                    continue
+                for fp in sub_dir.glob("*.csv"):
+                    groups[fp.name].append(fp)
+            if not groups:
+                continue
+            out_dir = out_root / dev_dir.name / sub
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for fname, group_files in sorted(groups.items()):
+                parsed = parse_de_filename(fname)
+                if parsed is None:
+                    if verbose:
+                        print(f"  Skipping unparseable file: {fname}")
+                    continue
+                agg = aggregate_seed_files(group_files, parsed["model"], alpha=alpha)
+                agg.to_csv(out_dir / fname, index=False)
+                rel = f"{dev_dir.name}/{sub}/{fname}"
+                written[rel] = len(group_files)
+                if verbose:
+                    print(f"  {rel}: {len(group_files)} seeds -> {len(agg)} genes")
+    return written

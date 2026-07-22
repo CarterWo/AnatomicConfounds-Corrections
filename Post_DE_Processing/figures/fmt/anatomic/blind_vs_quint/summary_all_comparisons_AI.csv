@@ -1,0 +1,5 @@
+n_genes,n_sig_G1_only,n_sig_G2_only,n_sig_both,n_flip,pct_flip,pearson_r_all,mab_all,pearson_r_top10,mab_top10,spearman_r_neglogp,spearman_r_neglogp_top10,spearman_r_lfc,mab_pct_all,mab_pct_top10,cell_type,model,annotation
+1000,16,6,5,235,23.5,0.7435,0.0317,0.8015,0.1408,0.4408,-0.372,0.6583,80.81,76.88,WholeBrain,dream,blind_vs_quint
+1000,5,2,7,48,4.8,0.9646,0.0075,0.9649,0.0319,0.9081,0.476,0.9525,22.04,19.25,Astrocytes,dream,blind_vs_quint
+999,1,2,17,40,4.0,0.9852,0.0067,0.9866,0.0247,0.956,0.7448,0.9825,14.04,10.95,Microglia,dream,blind_vs_quint
+1000,2,2,8,31,3.1,0.9908,0.0034,0.9906,0.014,0.9666,0.8612,0.9896,11.28,9.48,Astrocytes_CxHp,dream,blind_vs_quint

@@ -10,6 +10,7 @@ import re
 import matplotlib.pyplot as plt
 from anndata import AnnData
 from scipy.stats import norm
+from scipy.spatial import cKDTree
 from statsmodels.stats.multitest import multipletests
 
 
@@ -373,17 +374,18 @@ def filter_and_normalize(
     for adata in adatas:
         adata_manip = adata.copy()
         adata_manip.layers["counts"] = adata_manip.X.copy()
-        sc.pp.filter_cells(adata_manip, min_genes=min_gene_cnt)
-        sc.pp.filter_cells(adata_manip, min_counts=min_t_cnt)
+        # ── gene-wise first ──
         sc.pp.filter_genes(adata_manip, min_cells=min_cell_cnt)
         adata_manip = adata_manip[:, adata_manip.var["NegPrb"].fillna(False) == False]
         adata_manip = adata_manip[:, adata_manip.var["FalseCode"].fillna(False) == False].copy()
+        # ── cell-wise next ──
+        sc.pp.filter_cells(adata_manip, min_genes=min_gene_cnt)
+        sc.pp.filter_cells(adata_manip, min_counts=min_t_cnt)
         adata_manip = adata_manip[adata_manip.obs.pct_counts_NegPrb <= 10, :]
         sc.pp.normalize_total(adata_manip, target_sum=count_normalization_target)
         sc.pp.log1p(adata_manip)
         new_adatas.append(adata_manip)
     return new_adatas
-
 
 def combine_adatas(path_, adatas):
     """
@@ -500,26 +502,78 @@ def read_dictionary(dictionary_dir: str | os.PathLike) -> dict:
 
 
 def _alloc_by_baseline_with_caps(baseline_counts: pd.Series, caps: pd.Series, total: int) -> pd.Series:
+    """
+    Allocate `total` across regions in proportion to `baseline_counts`, each region
+    capped at `caps`.
+
+    Proportional water-filling: the share is split by baseline weight, and whenever a
+    region's share exceeds its available cells the surplus is re-spread over the
+    remaining regions in proportion to *their* baseline (again capped), repeating
+    until the whole `total` is placed or every region sits at its cap. This preserves
+    the relative baseline composition among regions that still have room, and — unlike
+    a single remainder pass — always places the full budget whenever the regions
+    jointly have the cells, for any set/number of regions. `total` is clamped to the
+    total available so it never over-asks.
+    """
     out = pd.Series(0, index=baseline_counts.index, dtype=int)
-    total = int(total)
-    if total <= 0 or baseline_counts.sum() <= 0 or caps.sum() <= 0:
+    caps = caps.reindex(out.index).fillna(0).clip(lower=0).astype(int)
+    weights = baseline_counts.reindex(out.index).clip(lower=0).astype(float)
+    remaining = int(min(int(total), int(caps.sum())))
+    if remaining <= 0 or float(weights.sum()) <= 0:
         return out
-    weights = baseline_counts.clip(lower=0).astype(float)
-    weights = weights / (weights.sum() if weights.sum() > 0 else 1.0)
-    raw = weights * total
-    base = np.floor(raw).astype(int)
-    take = base.clip(upper=caps.astype(int))
-    out += take
-    rem = total - int(take.sum())
-    if rem <= 0:
-        return out
-    frac = (raw - base).sort_values(ascending=False)
-    for idx in frac.index:
-        if rem == 0:
+
+    # Regions eligible to receive cells: positive baseline weight AND some capacity.
+    active = [r for r in out.index if caps[r] > 0 and weights[r] > 0]
+    while remaining > 0 and active:
+        w = weights[active]
+        wsum = float(w.sum())
+        if wsum <= 0:
             break
-        if out[idx] < int(caps.get(idx, 0)):
-            out[idx] += 1
-            rem -= 1
+        raw = w / wsum * remaining
+        base = np.floor(raw).astype(int)
+        # 1) place the proportional floor for each region, bounded by its room
+        for r in active:
+            give = min(int(base[r]), int(caps[r] - out[r]), remaining)
+            if give > 0:
+                out[r] += give
+                remaining -= give
+        # 2) hand any residual to the largest fractional shares that still have room
+        for r in (raw - base).sort_values(ascending=False).index:
+            if remaining <= 0:
+                break
+            if out[r] < caps[r]:
+                out[r] += 1
+                remaining -= 1
+        # regions now at capacity drop out; the loop re-spreads what's left over the rest
+        active = [r for r in active if out[r] < caps[r]]
+    return out
+
+
+def _alloc_equal_with_caps(caps: pd.Series, total: int) -> pd.Series:
+    """
+    Split `total` as evenly as possible across the regions in `caps.index`, giving
+    each region at most `caps[region]` cells.
+
+    Water-filling: every region with room gets an equal share; regions that hit their
+    cap drop out and the remainder is re-spread equally over those that still have
+    room. Unlike baseline-proportional allocation, small categories are represented
+    up to their availability instead of being rounded away — so no region is dropped
+    just because it is rare, as long as `total` >= the number of regions.
+    """
+    caps = caps.clip(lower=0).astype(int)
+    out = pd.Series(0, index=caps.index, dtype=int)
+    total = int(min(int(total), int(caps.sum())))
+    room = [r for r in caps.index if caps[r] > 0]
+    while total > 0 and room:
+        share = max(1, total // len(room))
+        for r in list(room):
+            if total <= 0:
+                break
+            give = min(share, int(caps[r]) - int(out[r]), total)
+            out[r] += give
+            total -= give
+            if out[r] >= caps[r]:
+                room.remove(r)
     return out
 
 
@@ -558,7 +612,7 @@ def set_region_abundance_by_FMT(
     """
     rng = np.random.default_rng(random_state)
     obs_rf = adata.obs[[region_col, fmt_col]].dropna().copy()
-    avail = obs_rf.groupby([fmt_col, region_col]).size().unstack(fill_value=0)
+    avail = obs_rf.groupby([fmt_col, region_col], observed=True).size().unstack(fill_value=0)
     selected = []
 
     for fmt in avail.index:
@@ -632,66 +686,84 @@ def _budget_for(total_per_fmt, key, total_avail: int) -> int:
     return int(total_avail)
 
 
-def _allocate_group(row: pd.Series, tgt, t: int) -> pd.Series:
+def _allocate_group(region_avail: pd.Series, target, budget: int, fill: str = "baseline") -> pd.Series:
     """
-    Turn availability + a target into per-region desired counts for a budget `t`.
+    Turn availability + a target into per-region desired counts for a `budget`.
 
-    `row` is region -> available count. `tgt` is a {region: count|fraction} dict
-    (or None). Specified regions hit their target; the leftover budget fills the
-    unspecified regions at their baseline proportions, everything capped at
-    availability and trimmed so the total never exceeds `t`.
+    `region_avail` is region -> available count. `target` is a {region: count|fraction}
+    dict (or None). Specified regions hit their target; the leftover budget fills the
+    unspecified regions, everything capped at availability and trimmed so the total
+    never exceeds `budget`.
+
+    `fill` controls how the leftover is spread over the unspecified regions:
+      - "baseline": proportional to each region's baseline abundance (rare regions
+        can round away to zero).
+      - "equal": split as evenly as possible across every unspecified region, capped
+        by availability, so each is represented before any is over-filled.
+    The two give the same *total* leftover; only its distribution differs.
     """
-    baseline = (row / row.sum()).fillna(0)
-    desired = pd.Series(0, index=row.index, dtype=int)
+    baseline = (region_avail / region_avail.sum()).fillna(0)
+    desired = pd.Series(0, index=region_avail.index, dtype=int)
 
-    if tgt:
-        is_count = all(isinstance(v, (int, np.integer)) for v in tgt.values())
+    def _fill(caps_unspec, baseline_unspec, remain):
+        if fill == "equal":
+            return _alloc_equal_with_caps(caps_unspec, remain)
+        return _alloc_by_baseline_with_caps(baseline_unspec, caps_unspec, remain)
+
+    if target:
+        # Targets are either absolute counts (int) or fractions of the budget (float).
+        is_count = all(isinstance(value, (int, np.integer)) for value in target.values())
         if is_count:
-            for r, v in tgt.items():
-                if r in desired.index:
-                    desired[r] = int(v)
+            for region, value in target.items():
+                if region in desired.index:
+                    desired[region] = int(value)
         else:
-            frac_map = {r: float(v) for r, v in tgt.items() if r in desired.index}
-            sfrac = sum(frac_map.values())
-            if sfrac > 1.0:
-                frac_map = {r: v / sfrac for r, v in frac_map.items()}
-            for r, fr in frac_map.items():
-                desired[r] = int(round(fr * t))
+            # Keep only fractions for regions this group actually has; renormalise if
+            # they sum above 1, then convert each fraction to a cell count of the budget.
+            region_fracs = {region: float(value) for region, value in target.items()
+                            if region in desired.index}
+            frac_sum = sum(region_fracs.values())
+            if frac_sum > 1.0:
+                region_fracs = {region: frac / frac_sum for region, frac in region_fracs.items()}
+            for region, frac in region_fracs.items():
+                desired[region] = int(round(frac * budget))
 
-        desired = desired.clip(upper=row)
-        unspecified = [r for r in desired.index if r not in tgt]
-        remain = max(0, t - int(desired.sum()))
-        if unspecified and remain > 0:
-            caps_unspec = (row - desired).loc[unspecified].clip(lower=0)
-            desired.loc[unspecified] += _alloc_by_baseline_with_caps(
-                baseline.loc[unspecified], caps_unspec, remain
-            )
+        desired = desired.clip(upper=region_avail)
+        # Whatever budget is left after the targeted regions goes to the untargeted ones.
+        unspecified = [region for region in desired.index if region not in target]
+        leftover_budget = max(0, budget - int(desired.sum()))
+        if unspecified and leftover_budget > 0:
+            unspecified_caps = (region_avail - desired).loc[unspecified].clip(lower=0)
+            desired.loc[unspecified] += _fill(unspecified_caps, baseline.loc[unspecified], leftover_budget)
     else:
-        desired = _alloc_by_baseline_with_caps(row, row.clip(lower=0), t)
+        # No target at all: fill the whole budget at baseline proportions.
+        desired = _fill(region_avail.clip(lower=0), region_avail, budget)
 
-    while int(desired.sum()) > t:
-        biggest = desired.idxmax()
-        if desired[biggest] == 0:
+    # Final trim: shave from the largest region until the total fits the budget.
+    while int(desired.sum()) > budget:
+        biggest_region = desired.idxmax()
+        if desired[biggest_region] == 0:
             break
-        desired[biggest] -= 1
-    return desired.clip(upper=row)
+        desired[biggest_region] -= 1
+    return desired.clip(upper=region_avail)
 
 
-def _sample_from_pool(sub, desired: pd.Series, region_col, rng) -> list:
-    """Randomly draw `desired[region]` obs-index labels from `sub` per region."""
-    out = []
-    for region, need in desired.items():
-        n = int(need)
-        if n <= 0:
+def _sample_from_pool(cells, desired: pd.Series, region_col, rng) -> list:
+    """Randomly draw `desired[region]` obs-index labels from `cells` per region."""
+    chosen = []
+    for region, count in desired.items():
+        n_needed = int(count)
+        if n_needed <= 0:
             continue
-        pool = sub.index[sub[region_col] == region].to_numpy()
-        out.extend(pool.tolist() if n >= len(pool) else
-                   rng.choice(pool, size=n, replace=False).tolist())
-    return out
+        pool = cells.index[cells[region_col] == region].to_numpy()
+        # Take the whole pool when we need at least all of it; otherwise a random subset.
+        chosen.extend(pool.tolist() if n_needed >= len(pool) else
+                      rng.choice(pool, size=n_needed, replace=False).tolist())
+    return chosen
 
 
 def _select_by_fmt_targets(avail, obs_rf, target_by_fmt, total_per_fmt,
-                           region_col, fmt_col, rng) -> set:
+                           region_col, fmt_col, rng, fill: str = "baseline") -> set:
     """
     Pooled (FMT-wise) selection: all cells within each FMT group are pooled across
     samples, then subsampled to hit that group's per-region targets on a single
@@ -699,94 +771,152 @@ def _select_by_fmt_targets(avail, obs_rf, target_by_fmt, total_per_fmt,
     """
     selected = []
     for fmt in avail.index:
-        row = avail.loc[fmt]
-        t = _budget_for(total_per_fmt, fmt, int(row.sum()))
-        desired = _allocate_group(row, target_by_fmt.get(fmt), t)
-        sub = obs_rf[obs_rf[fmt_col] == fmt]
-        selected += _sample_from_pool(sub, desired, region_col, rng)
+        region_avail = avail.loc[fmt]                       # this group's per-region counts
+        budget = _budget_for(total_per_fmt, fmt, int(region_avail.sum()))
+        desired = _allocate_group(region_avail, target_by_fmt.get(fmt), budget, fill=fill)
+        group_cells = obs_rf[obs_rf[fmt_col] == fmt]
+        selected += _sample_from_pool(group_cells, desired, region_col, rng)
     return set(selected)
 
 
-def _max_feasible_n(row: pd.Series, tgt) -> int:
+def _max_feasible_n(region_avail: pd.Series, target) -> int:
     """
-    Largest total cell count N a single sample can supply while hitting target `tgt`
+    Largest total cell count N a single sample can supply while hitting `target`
     exactly, with unspecified regions filled at baseline proportions.
 
-    For fraction targets, each specified region r constrains N <= avail_r / frac_r,
+    For fraction targets, each specified region constrains N <= avail_region /
+    frac_region (you need N * frac_region cells of it but only avail_region exist),
     and the unspecified regions jointly constrain N <= (sum unspecified avail) /
-    (1 - sum specified fracs). Returns row.sum() for a None or count-based target.
+    (1 - sum specified fracs). Returns the sample's total for a None or count target.
     """
-    total = int(row.sum())
-    if not tgt:
+    total = int(region_avail.sum())
+    if not target:
         return total
-    if all(isinstance(v, (int, np.integer)) for v in tgt.values()):
+    if all(isinstance(value, (int, np.integer)) for value in target.values()):
         return total  # explicit counts carry no fraction-based ceiling
 
-    frac = {r: float(v) for r, v in tgt.items() if r in row.index}
-    sf = sum(frac.values())
-    if sf > 1.0:
-        frac = {r: v / sf for r, v in frac.items()}
+    # Fraction targets for regions this sample has; renormalise if they sum above 1.
+    target_fracs = {region: float(value) for region, value in target.items()
+                    if region in region_avail.index}
+    frac_sum = sum(target_fracs.values())
+    if frac_sum > 1.0:
+        target_fracs = {region: frac / frac_sum for region, frac in target_fracs.items()}
 
-    caps = [row[r] / f for r, f in frac.items() if f > 0]
-    spec = set(frac)
-    rem_frac = 1.0 - sum(frac.values())
-    if rem_frac > 1e-9:
-        unspec_avail = int(row[[r for r in row.index if r not in spec]].sum())
-        caps.append(unspec_avail / rem_frac)
-    return int(np.floor(min(caps))) if caps else total
+    # Each targeted region caps N at avail / fraction; the tightest cap wins.
+    n_ceilings = [region_avail[region] / frac for region, frac in target_fracs.items() if frac > 0]
+    specified_regions = set(target_fracs)
+    leftover_frac = 1.0 - sum(target_fracs.values())
+    if leftover_frac > 1e-9:
+        # All untargeted regions together must fill the remaining fraction of N.
+        unspecified_avail = int(region_avail[[region for region in region_avail.index
+                                               if region not in specified_regions]].sum())
+        n_ceilings.append(unspecified_avail / leftover_frac)
+    return int(np.floor(min(n_ceilings))) if n_ceilings else total
+
+
+def _feasible_n_by_sample_targets(obs_rsf, target_by_fmt, total_per_fmt,
+                                  region_col, fmt_col, sample_col):
+    """Largest equal per-sample cell count feasible for `target_by_fmt`.
+
+    Returns ``(N, avail, fmt_groups, binding)`` where ``N`` is the biggest count every
+    sample can contribute at its FMT target (min over samples of
+    ``_max_feasible_n``, capped by any ``total_per_fmt`` ceiling) and ``binding`` is
+    the ``(N_i, fmt, sample)`` tuple that sets it. Factored out so a caller can read
+    the feasible N for two scenarios and draw both at a common (matched) size.
+    """
+    avail = obs_rsf.groupby([fmt_col, sample_col, region_col], observed=True).size().unstack(fill_value=0)
+    fmt_groups = list(avail.index.get_level_values(fmt_col).unique())
+
+    feasible_by_sample = []           # list of (N_i, fmt, sample)
+    budget_ceilings = []
+    for fmt in fmt_groups:
+        fmt_block = avail.xs(fmt, level=fmt_col)          # rows = sample, cols = region
+        n_samples = max(1, len(fmt_block.index))
+        target = target_by_fmt.get(fmt)
+        for sample_id in fmt_block.index:
+            feasible_by_sample.append((_max_feasible_n(fmt_block.loc[sample_id], target), fmt, sample_id))
+        if total_per_fmt is not None:
+            budget = _budget_for(total_per_fmt, fmt, int(fmt_block.values.sum()))
+            budget_ceilings.append(budget // n_samples)
+
+    # The cell-poorest sample sets the shared per-sample count for everyone.
+    binding = min(feasible_by_sample, key=lambda item: item[0])
+    N = binding[0]
+    if budget_ceilings:
+        N = min(N, min(budget_ceilings))
+    return N, avail, fmt_groups, binding
+
+
+def _per_sample_feasible_n(obs_rsf, target_by_fmt, region_col, fmt_col, sample_col) -> dict:
+    """Per-sample feasible maxima ``{sample_id: max N}`` for a target config.
+
+    Unlike `_feasible_n_by_sample_targets` (which returns the min across samples),
+    this keeps each sample's own `_max_feasible_n`, so two scenarios can be matched
+    sample-by-sample rather than collapsed to a single global count.
+    """
+    avail = obs_rsf.groupby([fmt_col, sample_col, region_col], observed=True).size().unstack(fill_value=0)
+    feasible_by_sample = {}
+    for fmt in avail.index.get_level_values(fmt_col).unique():
+        fmt_block = avail.xs(fmt, level=fmt_col)
+        target = target_by_fmt.get(fmt)
+        for sample_id in fmt_block.index:
+            feasible_by_sample[sample_id] = _max_feasible_n(fmt_block.loc[sample_id], target)
+    return feasible_by_sample
 
 
 def _select_by_sample_targets(obs_rsf, target_by_fmt, total_per_fmt,
-                              region_col, fmt_col, sample_col, rng) -> set:
+                              region_col, fmt_col, sample_col, rng,
+                              fill: str = "baseline", force_n=None, per_sample_n=None) -> set:
     """
-    Per-sample selection with equal, maximised contribution.
+    Per-sample selection at each sample's FMT target fraction.
 
-    Every sample is subsampled to its FMT's target fraction, and all samples in the
-    scenario contribute the *same* number of cells N. N is chosen as large as
-    possible subject to every sample being able to hit its target:
+    Each sample is subsampled to hit its FMT's target cortex fraction. The per-sample
+    cell count is chosen by, in priority order:
 
-        N = min over samples of `_max_feasible_n(sample, its FMT target)`
+    - ``per_sample_n`` : an explicit ``{sample_id: N_i}`` map (used to size-match two
+      scenarios sample-by-sample; each sample's N_i must be <= its own feasibility).
+      Per-sample counts may differ, so the FMT arm totals need not be equal.
+    - ``force_n``      : a single count applied to every sample (a common matched
+      size); must not exceed the feasible maximum.
+    - otherwise        : the maximisation ``N = min over samples of
+      _max_feasible_n(sample, target)`` (all samples get the same N; one cell-poor
+      sample caps everyone). ``total_per_fmt`` is an optional ceiling here.
 
-    so one cell-poor sample sets the shared per-sample count. If `total_per_fmt` is
-    given it acts as an optional ceiling (N also <= budget // n_samples per FMT);
-    when None, N is the pure feasibility maximum. Returns the selected labels as a set.
+    Returns the selected labels as a set.
     """
-    avail = obs_rsf.groupby([fmt_col, sample_col, region_col]).size().unstack(fill_value=0)
-    fmts = list(avail.index.get_level_values(fmt_col).unique())
+    N, avail, fmt_groups, binding = _feasible_n_by_sample_targets(
+        obs_rsf, target_by_fmt, total_per_fmt, region_col, fmt_col, sample_col)
 
-    feasible = []           # (N_i, fmt, sample)
-    ceilings = []
-    for fmt in fmts:
-        fmt_block = avail.xs(fmt, level=fmt_col)          # rows=sample, cols=region
-        n_samp = max(1, len(fmt_block.index))
-        tgt = target_by_fmt.get(fmt)
-        for samp in fmt_block.index:
-            feasible.append((_max_feasible_n(fmt_block.loc[samp], tgt), fmt, samp))
-        if total_per_fmt is not None:
-            budget = _budget_for(total_per_fmt, fmt, int(fmt_block.values.sum()))
-            ceilings.append(budget // n_samp)
-
-    binding = min(feasible, key=lambda x: x[0])
-    N = binding[0]
-    if ceilings:
-        N = min(N, min(ceilings))
-    if N <= 0:
-        raise ValueError(
-            f"Max equal per-sample contribution is 0: sample {binding[2]!r} "
-            f"(FMT {binding[1]!r}) cannot reach its target fraction. "
-            f"Lower `dev` or use balance='fmt'."
-        )
-    print(f"[sample-balanced] N={N} cells/sample x {len(feasible)} samples "
-          f"(limited by {binding[2]!r} in FMT {binding[1]!r}, max feasible {binding[0]})")
+    if per_sample_n is None:
+        if force_n is not None:
+            if force_n > N:
+                raise ValueError(
+                    f"force_n={force_n} exceeds the feasible per-sample max N={N} "
+                    f"(binding sample {binding[2]!r} in FMT {binding[1]!r}).")
+            N = int(force_n)
+        if N <= 0:
+            raise ValueError(
+                f"Max equal per-sample contribution is 0: sample {binding[2]!r} "
+                f"(FMT {binding[1]!r}) cannot reach its target fraction. "
+                f"Lower `dev` or use balance='fmt'."
+            )
+        print(f"[sample-balanced] N={N} cells/sample x {len(avail.index)} samples "
+              f"(feasible max {binding[0]}, limited by {binding[2]!r} in FMT {binding[1]!r})")
+    else:
+        counts = list(per_sample_n.values())
+        print(f"[sample-matched] per-sample N over {len(avail.index)} samples "
+              f"(min {min(counts)}, max {max(counts)})")
 
     selected = []
-    for fmt in fmts:
+    for fmt in fmt_groups:
         fmt_block = avail.xs(fmt, level=fmt_col)
-        tgt = target_by_fmt.get(fmt)
-        for samp in fmt_block.index:
-            desired = _allocate_group(fmt_block.loc[samp], tgt, N)
-            sub = obs_rsf[(obs_rsf[fmt_col] == fmt) & (obs_rsf[sample_col] == samp)]
-            selected += _sample_from_pool(sub, desired, region_col, rng)
+        target = target_by_fmt.get(fmt)
+        for sample_id in fmt_block.index:
+            # Each sample's count: its matched N_i if provided, else the shared feasible N.
+            n_for_sample = int(per_sample_n[sample_id]) if per_sample_n is not None else N
+            desired = _allocate_group(fmt_block.loc[sample_id], target, n_for_sample, fill=fill)
+            sample_cells = obs_rsf[(obs_rsf[fmt_col] == fmt) & (obs_rsf[sample_col] == sample_id)]
+            selected += _sample_from_pool(sample_cells, desired, region_col, rng)
     return set(selected)
 
 
@@ -802,6 +932,9 @@ def tag_region_abundance_by_FMT(
     fmt_col: str = "FMT",
     sample_col: str = "sample_ID",
     balance: str = "fmt",
+    fill_other: str = "baseline",
+    match_scenarios: bool = False,
+    match_reference_dev: float | None = None,
     col_prefixes: tuple[str, str] = ("G1", "G2"),
     copy: bool = False,
 ):
@@ -863,6 +996,35 @@ def tag_region_abundance_by_FMT(
         obs columns for region, treatment group, and biological sample.
     balance : {"fmt", "sample"}
         Draw cells pooled per FMT (default) or independently per sample. See above.
+    fill_other : {"baseline", "equal"}
+        How the non-manipulated regions share the leftover budget after the
+        region_of_interest is set. "baseline" (default) keeps each region in
+        proportion to its original abundance — deducting/adding relative to that
+        baseline; if a region's proportional share exceeds its available cells the
+        surplus is redistributed proportionally over the others, so the full leftover
+        is always placed and the region_of_interest still hits its target for any
+        set/number of non-cortex regions. "equal" instead splits the leftover evenly
+        across every other region (capped by availability). Only the
+        region_of_interest is ever manipulated; this controls the background
+        composition of everything else.
+    match_scenarios : bool
+        If True (balance='sample' only), match each sample to its own counterpart
+        across the mirror pair: sample i contributes N_i = min(feasible_G1(i),
+        feasible_G2(i)) to BOTH G1 and G2, at each scenario's target cortex fraction.
+        So a given sample (e.g. 120L) has the SAME cell count in G1 and G2, while
+        counts still vary across samples (no collapse to the poorest sample). Each
+        sample still hits its arm's exact target fraction; because per-sample counts
+        differ, the Stroke/Healthy arm totals within a scenario need not be equal.
+        Default False keeps the legacy behaviour where each scenario independently
+        maximises a single shared per-sample N (so G1 > G2).
+    match_reference_dev : float | None
+        Only used with match_scenarios. If set (e.g. the largest deviation, 1.5),
+        take each sample's matched count from that REFERENCE deviation's feasibility
+        instead of the current `dev`, so every deviation ends up with the same
+        per-sample cell counts. Cells are still drawn at the CURRENT dev's target
+        cortex fractions -- only the counts come from the reference. The larger
+        (more extreme) deviation is the more cell-limited, so its counts are always
+        feasible at milder deviations. None matches each deviation to itself.
     col_prefixes : (str, str)
         Prefixes for the two output columns (default ('G1', 'G2')).
     copy : bool
@@ -879,6 +1041,8 @@ def tag_region_abundance_by_FMT(
     """
     if balance not in ("fmt", "sample"):
         raise ValueError("balance must be 'fmt' or 'sample'.")
+    if fill_other not in ("equal", "baseline"):
+        raise ValueError("fill_other must be 'equal' or 'baseline'.")
 
     adata = adata.copy() if copy else adata
 
@@ -887,7 +1051,7 @@ def tag_region_abundance_by_FMT(
             raise KeyError(f"{col!r} not found in adata.obs")
 
     # Cross-sample mean/SD of the region-of-interest fraction.
-    counts_ps = adata.obs.groupby([sample_col, region_col]).size().unstack(fill_value=0)
+    counts_ps = adata.obs.groupby([sample_col, region_col], observed=True).size().unstack(fill_value=0)
     if region_of_interest not in counts_ps.columns:
         raise KeyError(
             f"region_of_interest {region_of_interest!r} not found in {region_col!r} "
@@ -902,17 +1066,62 @@ def tag_region_abundance_by_FMT(
     target_g1 = {up_fmt: {region_of_interest: hi}, down_fmt: {region_of_interest: lo}}
     target_g2 = {up_fmt: {region_of_interest: lo}, down_fmt: {region_of_interest: hi}}
 
+    # Optional reference-deviation targets: with match_scenarios, per-sample counts
+    # can be taken from a REFERENCE deviation (e.g. the largest) so every deviation
+    # shares the same per-sample counts. Cells are still drawn at the CURRENT dev's
+    # fractions above; only the counts are read from these reference targets.
+    ref_targets = None
+    if match_scenarios and match_reference_dev is not None:
+        hi_r = roi_mean + match_reference_dev * roi_std
+        lo_r = max(0.0, roi_mean - match_reference_dev * roi_std)
+        ref_targets = (
+            {up_fmt: {region_of_interest: hi_r}, down_fmt: {region_of_interest: lo_r}},
+            {up_fmt: {region_of_interest: lo_r}, down_fmt: {region_of_interest: hi_r}},
+        )
+
     if balance == "fmt":
+        if match_scenarios:
+            raise NotImplementedError(
+                "match_scenarios is currently implemented for balance='sample' only.")
         obs_rf = adata.obs[[region_col, fmt_col]].dropna().copy()
-        avail = obs_rf.groupby([fmt_col, region_col]).size().unstack(fill_value=0)
+        avail = obs_rf.groupby([fmt_col, region_col], observed=True).size().unstack(fill_value=0)
         select = lambda tgt: _select_by_fmt_targets(
             avail, obs_rf, tgt, total_per_fmt, region_col, fmt_col,
-            np.random.default_rng(random_state))
+            np.random.default_rng(random_state), fill=fill_other)
     else:  # "sample"
         obs_rsf = adata.obs[[region_col, fmt_col, sample_col]].dropna().copy()
+        per_sample_n = None
+        if match_scenarios:
+            # Match each sample to ITS OWN counterpart across the mirror pair: sample i
+            # contributes N_i = min(feasible_G1(i), feasible_G2(i)) to BOTH scenarios,
+            # at each scenario's target cortex fraction. So a given sample (e.g. 120L)
+            # ends with the same cell count in G1 and G2, while counts still vary across
+            # samples (no collapse to the poorest sample). The low-cortex target is the
+            # more cell-limited half, so this trims each sample's cortex-up count down to
+            # its own cortex-down count. Because per-sample counts differ, the
+            # Stroke/Healthy arm totals within a scenario need not be equal.
+            # Per-sample matched count at the CURRENT dev (always feasible for the draw).
+            f1 = _per_sample_feasible_n(obs_rsf, target_g1, region_col, fmt_col, sample_col)
+            f2 = _per_sample_feasible_n(obs_rsf, target_g2, region_col, fmt_col, sample_col)
+            per_sample_n = {s: int(min(f1[s], f2[s])) for s in f1}
+            if ref_targets is not None:
+                # Cap each sample to the reference deviation's matched count, so all
+                # deviations share the same per-sample counts. min() with the current
+                # feasibility above keeps the draw feasible even if the reference were
+                # somehow larger for a sample.
+                r1 = _per_sample_feasible_n(obs_rsf, ref_targets[0], region_col, fmt_col, sample_col)
+                r2 = _per_sample_feasible_n(obs_rsf, ref_targets[1], region_col, fmt_col, sample_col)
+                per_sample_n = {s: int(min(per_sample_n[s], r1[s], r2[s])) for s in per_sample_n}
+            bad = sorted(s for s, n in per_sample_n.items() if n <= 0)
+            if bad:
+                raise ValueError(
+                    f"Samples cannot reach the target at dev={dev}: {bad}. Lower `dev`.")
+            print(f"[match_scenarios] per-sample matched N (min over "
+                  f"{col_prefixes[0]}/{col_prefixes[1]}): "
+                  + ", ".join(f"{s}={n}" for s, n in per_sample_n.items()))
         select = lambda tgt: _select_by_sample_targets(
             obs_rsf, tgt, total_per_fmt, region_col, fmt_col, sample_col,
-            np.random.default_rng(random_state))
+            np.random.default_rng(random_state), fill=fill_other, per_sample_n=per_sample_n)
 
     sel_g1 = select(target_g1)
     sel_g2 = select(target_g2)
@@ -976,3 +1185,148 @@ def impact_metrics(naive_df, anat_df, region_markers: set, alpha=0.05):
         "leak_naive":               leak_naive,
         "leak_anat":                leak_anat,
     }
+
+
+def fix_stray_pixels(adata, region_col: str = "quint_region", slide_col: str = "slide_ID",
+                     reassign_background: bool = False, coords_key: str | None = None):
+    """
+    Clean up stray / unassigned QUINT region labels on a spatial AnnData.
+
+    1. "0,0,0" cells (atlas background) are either dropped (default) or, when
+       ``reassign_background=True``, kept and treated as strays in step 2.
+    2. Every remaining cell whose label is still a raw "R,G,B" triplet — a stray
+       pixel the atlas never mapped to a named region — is reassigned to the
+       region of its nearest ORIGINALLY-NAMED neighbour, computed per slide.
+
+    A cell is an eligible neighbour only if its *original* label was a genuine
+    region name — never another stray, a NaN, or a blank. The neighbour pool and
+    the labels copied from it are both taken from a snapshot of the labels made
+    before any reassignment, so a fixed stray can never seed another stray and
+    every reassignment points at real anatomy.
+
+    The pre-fix labels are preserved in ``obs[f"{region_col}_original"]``.
+
+    Parameters
+    ----------
+    adata : AnnData
+        Must carry per-cell region labels in ``obs[region_col]``, a slide key in
+        ``obs[slide_col]``, and 2-D coordinates in ``obsm['spatial_fov']`` /
+        ``obsm['spatial']`` (or x/y columns in ``obs``).
+    region_col : str
+        Column holding the QUINT region labels (default ``'quint_region'``).
+    slide_col : str
+        Column identifying each slide; KNN is done within a slide (default
+        ``'slide_ID'``).
+    reassign_background : bool
+        If False (default) drop "0,0,0" background cells; if True keep them and
+        reassign each to its nearest originally-named neighbour, exactly like any
+        other stray.
+    coords_key : str or None
+        obsm key for the coordinates the KNN runs in. If None (default) prefer
+        ``'spatial_fov'`` then ``'spatial'`` — 'spatial_fov' is the frame this
+        pipeline builds its region labels in, so the search must match it.
+
+    Returns
+    -------
+    AnnData
+        Cleaned object. A new AnnData is returned; the input is not modified when
+        any "0,0,0" cells are dropped, matching the original behaviour.
+    """
+    rgb_pattern = re.compile(r'^\d+,\d+,\d+$')
+
+    # -- Step 1: handle "0,0,0" atlas background -----------------------------------
+    region_str = adata.obs[region_col].astype(str)
+    zero_mask = (region_str.values == '0,0,0')
+    n_zero = int(zero_mask.sum())
+    if n_zero:
+        if reassign_background:
+            # Keep them: "0,0,0" matches the RGB pattern, so it is picked up as a
+            # stray below and reassigned to its nearest originally-named neighbour.
+            print(f"Keeping {n_zero} '0,0,0' background cells for reassignment")
+        else:
+            adata = adata[~zero_mask].copy()
+            region_str = adata.obs[region_col].astype(str)
+            print(f"Removed {n_zero} cells with {region_col} == '0,0,0'")
+
+    # -- Step 2: classify labels from the ORIGINAL snapshot ------------------------
+    # Snapshot the labels up front; every downstream decision (which cells are
+    # strays, which cells are valid neighbours, what label a stray inherits) is
+    # made against THIS snapshot, so reassigned strays never influence each other.
+    original = adata.obs[region_col].copy()
+
+    stray_mask = region_str.str.match(rgb_pattern).fillna(False).values
+    blank_mask = region_str.str.strip().isin(['', 'nan', 'None', '<NA>']).values
+    named_mask = ~stray_mask & ~blank_mask   # cells ORIGINALLY given a real region name
+
+    print(f"Stray (RGB) entries to reassign: {int(stray_mask.sum())} / {len(stray_mask)}")
+    if stray_mask.any():
+        print(original[stray_mask].value_counts(dropna=False))
+
+    # -- Step 3: resolve coordinates -----------------------------------------------
+    # This pipeline builds its region labels in the 'spatial_fov' frame (napari
+    # viz, the polygon region assignment, and the QUINT export all use it), so the
+    # KNN must run in that same frame. 'spatial' can be a different (e.g. FOV-local)
+    # layout, which would scatter the reassignments. Prefer 'spatial_fov'; allow an
+    # explicit override via coords_key.
+    if coords_key is not None:
+        if coords_key not in adata.obsm:
+            raise ValueError(f"coords_key={coords_key!r} not in adata.obsm ({list(adata.obsm)})")
+        coords = np.asarray(adata.obsm[coords_key])[:, :2]
+        print(f"Using coordinates from obsm[{coords_key!r}]")
+    elif 'spatial_fov' in adata.obsm:
+        coords = np.asarray(adata.obsm['spatial_fov'])[:, :2]
+        print("Using coordinates from obsm['spatial_fov']")
+    elif 'spatial' in adata.obsm:
+        coords = np.asarray(adata.obsm['spatial'])[:, :2]
+        print("Using coordinates from obsm['spatial']")
+    else:
+        for xc, yc in [('x_centroid', 'y_centroid'), ('CenterX', 'CenterY'), ('x', 'y')]:
+            if xc in adata.obs.columns and yc in adata.obs.columns:
+                coords = adata.obs[[xc, yc]].values
+                print(f"Using coordinate columns: {xc}, {yc}")
+                break
+        else:
+            raise ValueError("No coordinate array found. Check obsm keys or obs columns.")
+
+    # -- Step 4: per-slide KNN onto ORIGINALLY-NAMED cells -------------------------
+    fixed = original.copy()
+    obs_index = adata.obs.index
+
+    for slide, slide_idx in adata.obs.groupby(slide_col, observed=True).groups.items():
+        slide_pos = obs_index.get_indexer(slide_idx)
+
+        slide_stray = stray_mask[slide_pos]
+        slide_named = named_mask[slide_pos]
+
+        n_stray = int(slide_stray.sum())
+        if n_stray == 0:
+            continue
+        if slide_named.sum() == 0:
+            print(f"WARNING: slide {slide} has no originally-named cells — "
+                  f"cannot reassign {n_stray} stray cells")
+            continue
+
+        coords_named = coords[slide_pos][slide_named]
+        coords_stray = coords[slide_pos][slide_stray]
+        labels_named = original.values[slide_pos][slide_named]
+
+        _, nn_idx = cKDTree(coords_named).query(coords_stray, k=1)
+        fixed.iloc[slide_pos[slide_stray]] = labels_named[nn_idx]
+        print(f"Slide {slide}: reassigned {n_stray} stray cells")
+
+    adata.obs[f'{region_col}_original'] = original
+    adata.obs[region_col] = fixed
+
+    # A reassigned stray's old RGB label no longer applies to any cell; if the
+    # column is categorical, drop those now-empty categories so they don't linger
+    # in .cat.categories / value_counts. The _original column keeps them.
+    if isinstance(adata.obs[region_col].dtype, pd.CategoricalDtype):
+        adata.obs[region_col] = adata.obs[region_col].cat.remove_unused_categories()
+
+    print(f"\n=== {region_col} after fix ===")
+    print(adata.obs[region_col].value_counts(dropna=False))
+    # Compare as strings so NaN==NaN doesn't inflate the count (NaN != NaN is True).
+    n_changed = int((original.astype(str).values != fixed.astype(str).values).sum())
+    print(f"Reassigned cells: {n_changed}")
+
+    return adata

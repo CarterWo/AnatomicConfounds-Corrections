@@ -19,8 +19,13 @@ Output: figures/consolidated_summary.xlsx
 import pandas as pd
 from pathlib import Path
 
+from plot_utils import resolve_results_root
+
 SCRIPT_DIR = Path(__file__).resolve().parent
-FIG_BASE = Path("/path/to/LMM_Model_Comparison/output")
+# Framework-labelled figures dir where the visualize_*.py scripts write their
+# summary_all_comparisons_*.csv files (matches their OUT_BASE).
+FRAMEWORK, _ = resolve_results_root()
+FIG_BASE = SCRIPT_DIR / "figures" / FRAMEWORK
 
 # ── Source CSVs ──────────────────────────────────────────────────────────────
 # G1 vs G2 sources

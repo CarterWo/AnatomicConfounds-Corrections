@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<series name='First_input'>
+    <slice filename='pseudo_histology_120L_s001.png' nr='1' width='613' height='1500'/>
+    <slice filename='pseudo_histology_323DY_s002.png' nr='2' width='757' height='1500'/>
+    <slice filename='pseudo_histology_217R_s003.png' nr='3' width='1475' height='1500'/>
+    <slice filename='pseudo_histology_367R_s004.png' nr='4' width='1345' height='1500'/>
+    <slice filename='pseudo_histology_215L_s005.png' nr='5' width='1386' height='1500'/>
+    <slice filename='pseudo_histology_368R_s006.png' nr='6' width='2560' height='1500'/>
+</series>

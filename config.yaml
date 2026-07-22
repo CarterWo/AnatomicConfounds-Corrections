@@ -1,85 +1,193 @@
 # ============================================================================
-# Pipeline configuration — fill in the absolute paths for YOUR machine.
+# Pipeline configuration — TWO DATA FRAMEWORKS
 #
-# Centralizes every path that Pre_processing/Pre_DE_processing.ipynb otherwise
-# hardcodes. Edit the values below, then load in the notebook with:
+# This pipeline runs over two independent datasets ("frameworks"), each with its
+# own raw CosMx export, sample_info workbook, Napari polygons, QUINT maps, and
+# outputs:
 #
-#     import yaml
-#     cfg = yaml.safe_load(open("config.yaml"))
-#     CosMx_Export_Path = cfg["inputs"]["cosmx_export_dir"]
-#     ...
+#   genotype : E2_vs_E4_FAD study — contrast Genotype (E4 vs E2), within MCI.
+#   fmt      : Stroke study        — contrast FMT (Stroke_FMT vs Healthy_FMT).
 #
-# Notes
-# -----
-# - Use forward slashes even on Windows (C:/data/...); they avoid backslash
-#   escaping and work fine in Python.
-# - The large raw data are not in this repo — download from Zenodo
-#   (https://doi.org/10.5281/zenodo.19923648) and point `cosmx_export_dir` at it.
+# Every framework block below is self-contained: inputs / intermediate / outputs
+# / composition. Outputs are LABELLED per framework (…/genotype/… vs …/fmt/…) so
+# the two runs never overwrite each other.
+#
+# Selecting a framework
+# ---------------------
+# - `active_framework` (below) is the default when nothing overrides it.
+# - R scripts:  Rscript DE_scripts/LMM_all.R --framework fmt   (or genotype)
+# - Notebooks:  set env PIPELINE_FRAMEWORK=fmt, or edit the FRAMEWORK line in the
+#               first cell.
+# - aggregate_seeds.py:  python aggregate_seeds.py --framework fmt
+#
+# Paths are RELATIVE to the repo root (where this config.yaml lives) unless
+# absolute; the loaders resolve them against the config's directory. Use forward
+# slashes even on Windows.
+#
+# The large raw data are not in this repo — download from Zenodo
+# (https://doi.org/10.5281/zenodo.19923648) and point each `cosmx_export_dir`
+# at the matching dataset.
 # ============================================================================
 
-# ---------------------------------------------------------------------------
-# RAW / INPUT DATA  — the pipeline's initial inputs (README "Step 1")
-# ---------------------------------------------------------------------------
-inputs:
+# Default framework when --framework / PIPELINE_FRAMEWORK / DE_FRAMEWORK is unset.
+active_framework: "fmt"
 
-  # Root of the raw CosMx SMI export. Walked by ezy.load.cosmx(); must contain
-  # per-slide `flatFiles/` folders holding (each may be gzipped .gz):
-  #   {name}_exprMat_file.csv        counts matrix (cells x genes)
-  #   {name}_fov_positions_file.csv  FOV stage positions
-  #   {name}_metadata_file.csv       per-cell metadata + cell_type + coords
-  cosmx_export_dir: "path/to/CosMx/Export"
+frameworks:
 
-  # Sample-metadata workbook (ships in this repo root as sample_info.xlsx).
-  # Read by ezy.read_dictionary(); needs a 'sample_metadata' sheet
-  # (slide_ID, sample_ID, FMT / Treatment, ...) and an optional 'sub_regions' sheet.
-  sample_info_xlsx: "path/to/sample_info.xlsx"
+  # =========================================================================
+  # GENOTYPE FRAMEWORK — E2_vs_E4_FAD study, contrast Genotype (E4 vs E2).
+  # =========================================================================
+  genotype:
 
-  # Napari polygon CSVs that assign SAMPLE identity when multiple samples share
-  # one slide. Layout:  <dir>/<slide_ID>/<sample_ID>.csv
-  # (each CSV has axis-0 / axis-1 vertex columns grouped by an 'index' column).
-  napari_sample_polygons_dir: "path/to/napari/sample_polygons"
+    inputs:
+      # obs/metadata column holding the per-cell cell-type (cluster) labels from
+      # the CosMx export; renamed to 'cell_type' in Pre_DE_processing.ipynb.
+      cell_type_col: "RNA_Rerun_w_CosMx_Profile_Cell.Typing.InSituType.1_1_clusters"
 
-  # Napari polygon CSVs that assign anatomical REGION labels -> obs['napari_region']
-  # (Cortex, Hippocampus, Striatum, ...). Layout:  <dir>/<slide_ID>/<Region>.csv
-  # Committed copies of these live under Final_Data/Polygons/.
-  napari_region_polygons_dir: "path/to/napari/region_polygons"
+      # Root of the raw CosMx SMI export (walked by ezy.load.cosmx()). Must hold
+      # per-slide flatFiles/ folders with {name}_exprMat_file.csv,
+      # {name}_fov_positions_file.csv, {name}_metadata_file.csv (may be .gz).
+      cosmx_export_dir: "../../Carter_Storage/E2_vs_E4_FAD/raw_data/"
 
-  # QUINT colour key workbook (Color_key.xlsm): R/G/B -> region-name lookup used by
-  # Quint_Scripts/Quint_Pipeline.Rmd to translate atlas pixel colours to regions.
-  quint_color_key_xlsm: "path/to/quint/Color_key.xlsm"
+      # Sample-metadata workbook (read by ezy.read_dictionary()); needs a
+      # 'sample_metadata' sheet (slide_ID, sample_ID, FMT, Sex, Genotype, ...).
+      sample_info_xlsx: "sample_info_genotype.xlsx"
 
-  # QUINT atlas region labels exported from Quint_Scripts/Quint_Pipeline.Rmd
-  # (single CSV with a 'quint_region' column indexed by cell). This is produced
-  # MID-pipeline by the QUINT (R) step; leave as a placeholder until then.
-  quint_labels_csv: "path/to/quint_output.csv"
+      # Napari polygon CSVs assigning SAMPLE identity when a slide holds several
+      # samples.  Layout: <dir>/<slide_ID>/<sample_ID>.csv
+      napari_sample_polygons_dir: "napari_definitions/genotype"
 
-# ---------------------------------------------------------------------------
-# INTERMEDIATE  — artifacts produced and re-read within a step
-# ---------------------------------------------------------------------------
-intermediate:
+      # Napari polygon CSVs assigning anatomical REGION labels -> napari_region.
+      # Layout: <dir>/<slide_ID>/<Region>.csv
+      napari_region_polygons_dir: "napari_definitions/genotype"
 
-  # Folder where Quint_Pipeline.Rmd writes the pseudo-histology / segmentation
-  # PNGs, feeds them to QUINT/QuickNII/VisuAlign, and reads the atlas images back.
-  quint_images_dir: "path/to/quint_images"
+      # QUINT colour key workbook (R/G/B -> region-name lookup); shared atlas key.
+      quint_color_key_xlsm: "Quint_Scripts/Color_key.xlsm"
 
-# ---------------------------------------------------------------------------
-# OUTPUTS / INTERMEDIATE  — where the pipeline writes
-# ---------------------------------------------------------------------------
-outputs:
+      # QUINT atlas region labels exported by Quint_Pipeline.Rmd (single CSV with
+      # a 'quint_region' column indexed by cell). Produced MID-pipeline by the
+      # QUINT (R) step; placeholder until then.
+      quint_labels_csv: "Quint_Scripts/genotype/Quint_Labels.csv"
 
-  # Assembled, annotated, normalized AnnData written by the preprocessing step.
-  adata_h5ad: "path/to/output/adata.h5ad"
+    intermediate:
+      # Where Quint_Pipeline.Rmd writes the pre-QUINT pseudo-histology &
+      # segmentation PNGs, and reads the atlas PNGs back. Unlike fmt, genotype
+      # keeps both generations in one flat folder, so the two keys coincide.
+      quint_images_dir: "Quint_Scripts/QUINT_atlas_maps/genotype"
+      quint_atlas_images_dir: "Quint_Scripts/QUINT_atlas_maps/genotype"
 
-  # CSV export of the full object handed to the QUINT (R) atlas-labeling step.
-  quint_export_dir: "path/to/output/seurat_export"
+    outputs:
+      # Assembled, annotated, normalized AnnData from the preprocessing step.
+      adata_h5ad: "Final_Data/genotype/adata_full.h5ad"
+      # CSV export handed to the QUINT (R) atlas-labeling step.
+      quint_export_dir: "csvs/genotype"
+      # CSV export of the analysis cohort consumed by BOTH R DE scripts. LMM_all
+      # derives the G1/G2 cortex-up/down subsets from the masks in cell_metadata.csv.
+      de_export_base: "csvs/genotype"
+      # Root for DE model result CSVs. DE_Base_Analysis -> <dir>/base/{...};
+      # LMM_all -> <dir>/dev_<dev>/seed_<seed>/{...}.
+      lmm_results_dir: "LMM_output/genotype"
 
-  # CSV export of the full analysis cohort, consumed by BOTH R differential-
-  # expression notebooks. DE_Base_Analysis uses it directly; LMM_all derives the
-  # composition-engineered subsets from the per-cell G1/G2 masks carried in
-  # cell_metadata.csv (no separate up/down folders are exported anymore).
-  de_export_base: "path/to/output/DE_csv_folder/base"
+    composition:
+      # obs column defining the two contrasted groups (renamed to 'Treatment' in
+      # the DE scripts) and its two levels.
+      group_col: "Genotype"
+      up_group: "E4"          # cortex-enriched in scenario G1 (depleted in G2)
+      down_group: "E2"
+      reference: "E2"         # DE reference level -> coefficients report E4 vs E2
+      comparison: "E4"        # DE non-reference level; contrast = comparison vs reference.
+                              # The DE scripts restrict every model to these two groups.
+      # Cohort restriction applied before the contrast: {obs_col: [allowed, ...]}.
+      # Isolate genotype within the MCI disease context.
+      cohort_filter: {FMT: ["MCI"]}
+      # Regions dropped from the cohort (spatial artefact / off-target tissue).
+      drop_regions: ["Olfactory"]
+      # Region whose per-sample fraction is shifted by ±dev·SD.
+      region_of_interest: "Cortex"
+      # How cells are drawn to hit targets: "sample" (per-sample, equal N) or "fmt".
+      balance: "sample"
+      # Size-match each sample between the two mirror scenarios: a given sample gets
+      # the same cell count in G1 and G2 (N_i = min of its G1/G2 feasibility), so the
+      # scenarios are per-sample matched. Counts still vary across samples.
+      match_scenarios: true
+      # Also match per-sample counts ACROSS deviations to this reference deviation
+      # (the most extreme / most cell-limited), so every deviation uses the same
+      # per-sample counts. null -> each deviation matches only itself.
+      match_reference_dev: 1.5
+      # Deviation magnitudes (SD units); embedded in mask names G1_{seed}_{dev}.
+      deviations: [1.5, 1.0, 0.5, 0.25]
+      # Iterations tagged per deviation. DESeq2 uses all; the slower models use
+      # only the first N seeds of that same pool, so every model is scored on
+      # nested subsets of one iteration series rather than on separate draws.
+      deseq2_iterations: 100
+      dream_iterations: 3
+      # Wilcoxon + logistic-regression LR (cell-level tests).
+      sc_iterations: 10
 
-  # Root for the differential-expression model result CSVs written by the R
-  # notebooks. DE_Base_Analysis writes to <lmm_results_dir>/base/{Global_CT_Analysis,
-  # Local_Regional_Analysis,Pseudobulk_Validation}; LMM_all writes under the root.
-  lmm_results_dir: "path/to/output/lmm_outputs"
+  # =========================================================================
+  # FMT FRAMEWORK — Stroke study, contrast FMT (Stroke_FMT vs Healthy_FMT).
+  # NOTE: the FMT column also carries a third 'Cntrl' arm. cohort_filter now keeps
+  # only Stroke_FMT / Healthy_FMT, so 'Cntrl' (and any other FMT value) is dropped
+  # from the exported object up front — not just from the DE contrast at fit time.
+  # =========================================================================
+  fmt:
+
+    inputs:
+      # obs/metadata column holding the per-cell cell-type (cluster) labels from
+      # the CosMx export; renamed to 'cell_type' in Pre_DE_processing.ipynb.
+      cell_type_col: "RNA_Rerun_w_CosMx_Profile_Cell.Typing.InSituType.1_1_clusters"
+
+      # FILL IN: path to the stroke dataset's raw CosMx export on your machine.
+      cosmx_export_dir: "../raw_data/FMT_comp"
+
+      sample_info_xlsx: "sample_info_FMT.xlsx"
+      napari_sample_polygons_dir: "napari_definitions/fmt"
+      napari_region_polygons_dir: "napari_definitions/fmt"
+      quint_color_key_xlsm: "Quint_Scripts/Color_key.xlsm"
+      quint_labels_csv: "Quint_Scripts/QUINT_atlas_maps/fmt/QUINT_labels.csv"
+
+    intermediate:
+      # PRE-QUINT. Where Quint_Pipeline.Rmd WRITES the matched pair per section —
+      # pseudo_histology_<sample>_s00N.png (the reference image QuickNII registers)
+      # and segmentation_cells_<sample>_s00N.png (the object layer). Load this
+      # folder into QuickNII/VisuAlign by hand.
+      quint_images_dir: "Quint_Scripts/QUINT_atlas_maps/fmt/Segmentations"
+      # POST-QUINT. Atlas-coloured PNGs QUINT writes back out; the inverse-transform
+      # chunk READS these to recover each cell's region colour. Separate from the
+      # folder above because QUINT owns this directory and renumbers the _s00N
+      # index by series order, so the names do not round-trip.
+      quint_atlas_images_dir: "Quint_Scripts/QUINT_atlas_maps/fmt/Output/Images"
+
+    outputs:
+      adata_h5ad: "Final_Data/fmt/adata_full.h5ad"
+      quint_export_dir: "csvs/fmt"
+      de_export_base: "csvs/fmt"
+      lmm_results_dir: "LMM_output/fmt"
+
+    composition:
+      group_col: "FMT"
+      up_group: "Stroke_FMT"
+      down_group: "Healthy_FMT"
+      reference: "Healthy_FMT"
+      comparison: "Stroke_FMT"  # DE non-reference level; contrast = Stroke_FMT vs Healthy_FMT.
+                                # The DE scripts restrict every model to these two groups
+                                # (drops the 'Cntrl' arm from the contrast at fit time).
+      # Keep only the two contrasted FMT arms; drops 'Cntrl' (and any other FMT
+      # value) from the exported object, not just from the DE contrast.
+      cohort_filter: {FMT: ["Stroke_FMT", "Healthy_FMT"]}
+      drop_regions: ["Olfactory"]
+      region_of_interest: "Cortex"
+      balance: "sample"
+      # Per-sample size-match between G1 and G2 (same cell count per sample in both
+      # mirror scenarios; N_i = min of its G1/G2 feasibility). See genotype block.
+      match_scenarios: true
+      # Match per-sample counts across deviations to this reference (most extreme) dev.
+      match_reference_dev: 1.5
+      deviations: [1.5, 1.0, 0.5, 0.25]
+      # Iterations tagged per deviation. DESeq2 uses all; the slower models use
+      # only the first N seeds of that same pool, so every model is scored on
+      # nested subsets of one iteration series rather than on separate draws.
+      deseq2_iterations: 100
+      dream_iterations: 3
+      # Wilcoxon + logistic-regression LR (cell-level tests).
+      sc_iterations: 10

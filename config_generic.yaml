@@ -1,0 +1,87 @@
+# ============================================================================
+# Pipeline configuration TEMPLATE — fill in the paths for YOUR machine.
+#
+# The pipeline supports multiple independent datasets ("frameworks"). Each
+# framework block is self-contained (inputs / intermediate / outputs /
+# composition) and writes to LABELLED output folders so runs never collide.
+#
+# Select a framework per run:
+#   - `active_framework` is the default.
+#   - R:        Rscript DE_scripts/LMM_all.R --framework <name>
+#   - Notebook: env PIPELINE_FRAMEWORK=<name>, or edit the first cell's FRAMEWORK.
+#   - Python:   python Post_DE_Processing/aggregate_seeds.py --framework <name>
+#
+# Notes
+# -----
+# - Use forward slashes even on Windows (C:/data/...).
+# - Large raw data live on Zenodo (https://doi.org/10.5281/zenodo.19923648).
+# - Add / rename framework blocks freely; the loaders read frameworks.<name>.
+# ============================================================================
+
+active_framework: "framework_a"
+
+frameworks:
+
+  framework_a:
+
+    inputs:
+      # Root of the raw CosMx SMI export (per-slide flatFiles/ folders with
+      # {name}_exprMat_file.csv, {name}_fov_positions_file.csv,
+      # {name}_metadata_file.csv; each may be gzipped).
+      cosmx_export_dir: "path/to/CosMx/Export"
+
+      # Sample-metadata workbook: 'sample_metadata' sheet (slide_ID, sample_ID,
+      # <contrast column>, ...) + optional 'sub_regions' sheet.
+      sample_info_xlsx: "path/to/sample_info.xlsx"
+
+      # Napari SAMPLE-identity polygons: <dir>/<slide_ID>/<sample_ID>.csv
+      napari_sample_polygons_dir: "path/to/napari/framework_a"
+      # Napari REGION polygons -> napari_region: <dir>/<slide_ID>/<Region>.csv
+      napari_region_polygons_dir: "path/to/napari/framework_a"
+
+      # QUINT colour key (R/G/B -> region name); shared atlas key.
+      quint_color_key_xlsm: "path/to/quint/Color_key.xlsm"
+      # QUINT atlas region labels (produced mid-pipeline by the QUINT R step).
+      quint_labels_csv: "path/to/quint/framework_a/Quint_Labels.csv"
+
+    intermediate:
+      # PRE-QUINT: where Quint_Pipeline.Rmd WRITES pseudo-histology & segmentation
+      # PNGs for you to load into QuickNII/VisuAlign.
+      quint_images_dir: "path/to/quint_images/framework_a"
+      # POST-QUINT: where it READS the atlas-coloured PNGs QUINT hands back. Set
+      # to the same directory as above if your QUINT run writes back in place.
+      quint_atlas_images_dir: "path/to/quint_images/framework_a/Output/Images"
+
+    outputs:
+      # Assembled, annotated, normalized AnnData written by preprocessing.
+      adata_h5ad: "path/to/output/framework_a/adata.h5ad"
+      # CSV export handed to the QUINT (R) atlas-labeling step.
+      quint_export_dir: "path/to/output/framework_a/seurat_export"
+      # CSV export of the analysis cohort consumed by BOTH R DE scripts.
+      de_export_base: "path/to/output/framework_a/DE_csv"
+      # Root for DE model result CSVs (base/ and dev_<dev>/seed_<seed>/).
+      lmm_results_dir: "path/to/output/framework_a/lmm_outputs"
+
+    composition:
+      # obs column defining the contrast (renamed 'Treatment' in the DE scripts).
+      group_col: "Genotype"
+      up_group: "GroupHigh"      # cortex-enriched in G1 (depleted in G2)
+      down_group: "GroupLow"
+      reference: "GroupLow"      # DE reference level
+      # Cohort restriction before the contrast: {obs_col: [allowed, ...]}; {} = none.
+      cohort_filter: {}
+      # Regions dropped from the cohort before analysis.
+      drop_regions: ["Olfactory"]
+      # Region whose per-sample fraction is shifted by ±dev·SD.
+      region_of_interest: "Cortex"
+      balance: "sample"          # "sample" (per-sample, equal N) or "fmt" (pooled)
+      deviations: [1.5, 1.0, 0.5, 0.25]
+      deseq2_iterations: 100     # tagged per deviation; DESeq2 uses all
+      dream_iterations: 3        # Dream LMM uses only the first N
+
+  # Duplicate the block above for each additional dataset, e.g.:
+  # framework_b:
+  #   inputs: { ... }
+  #   intermediate: { ... }
+  #   outputs: { ... }
+  #   composition: { ... }

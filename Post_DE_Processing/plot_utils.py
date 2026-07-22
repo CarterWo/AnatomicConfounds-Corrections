@@ -1,13 +1,100 @@
 """
 plot_utils.py
 =============
-Shared plotting helpers for LMM model comparison visualizations.
+Shared plotting helpers for LMM model comparison visualizations, plus the
+framework resolver used by every post-DE script so their inputs/outputs are
+labelled per framework (genotype / fmt).
 """
 
+import os
+import sys
+from pathlib import Path
+
 import numpy as np
+import yaml
 import matplotlib.pyplot as plt
 from matplotlib.patheffects import withStroke
 from scipy.optimize import brentq
+
+
+# =============================================================================
+# FRAMEWORK RESOLUTION  (shared by the post-DE scripts)
+# =============================================================================
+
+def find_config(name: str = "config.yaml") -> Path:
+    """Search cwd, its parents, and the script's parents for config.yaml."""
+    here = Path(__file__).resolve()
+    for d in [Path.cwd(), *Path.cwd().parents, here.parent, *here.parents]:
+        if (d / name).exists():
+            return d / name
+    raise FileNotFoundError(f"{name} not found near {Path.cwd()} or {here.parent}")
+
+
+def _framework_from_argv(default=None):
+    """Read (and strip) a --framework NAME / --framework=NAME flag from sys.argv.
+
+    These figure scripts don't use argparse, so we pull the flag out by hand and
+    remove it, leaving the rest of sys.argv untouched (subprocess relaunches that
+    re-exec the file therefore won't choke on it).
+    """
+    name = default
+    argv = sys.argv[1:]
+    keep, i = [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--framework" and i + 1 < len(argv):
+            name = argv[i + 1]; i += 2; continue
+        if a.startswith("--framework="):
+            name = a.split("=", 1)[1]; i += 1; continue
+        keep.append(a); i += 1
+    sys.argv[1:] = keep
+    return name
+
+
+def select_framework(cfg: dict, name=None):
+    """Return (framework_block, framework_name).
+
+    Order: explicit arg -> $PIPELINE_FRAMEWORK -> config active_framework. Falls
+    back to a flat/legacy config (top-level inputs/outputs/composition).
+    """
+    if "frameworks" not in cfg:
+        return cfg, (cfg.get("active_framework") or "default")
+    name = name or os.environ.get("PIPELINE_FRAMEWORK") or cfg.get("active_framework")
+    if not name:
+        raise SystemExit("No framework selected: pass --framework, set "
+                         "PIPELINE_FRAMEWORK, or set active_framework in config.yaml.")
+    if name not in cfg["frameworks"]:
+        raise SystemExit(f"Framework {name!r} not in config. "
+                         f"Available: {list(cfg['frameworks'])}")
+    return cfg["frameworks"][name], name
+
+
+def resolve_framework(name=None):
+    """Load config.yaml and pick the framework.
+
+    Returns (framework_block, framework_name, config_dir:Path). Framework comes
+    from `name` -> --framework -> $PIPELINE_FRAMEWORK -> active_framework.
+    """
+    cfg_path = find_config()
+    cfg = yaml.safe_load(open(cfg_path))
+    if name is None:
+        name = _framework_from_argv()
+    fw, fw_name = select_framework(cfg, name)
+    print(f"[framework] {fw_name}")
+    return fw, fw_name, cfg_path.parent
+
+
+def resolve_results_root(name=None):
+    """Return (framework_name, results_root:Path).
+
+    results_root is the framework's ``outputs.lmm_results_dir`` (the labelled DE
+    results folder, e.g. LMM_output/genotype), resolved to an absolute path.
+    """
+    fw, fw_name, cfg_dir = resolve_framework(name)
+    root = Path(fw["outputs"]["lmm_results_dir"])
+    if not root.is_absolute():
+        root = cfg_dir / root
+    return fw_name, root
 
 
 def draw_proportional_venn(ax, n_left, n_right, n_both,
@@ -28,13 +115,17 @@ def draw_proportional_venn(ax, n_left, n_right, n_both,
     total = n_left + n_right + n_both
 
     # Solve for normalised half-distance t = d/(2r) in (0,1)
-    if total > 0 and n_both > 0:
+    if total > 0 and 0 < n_both < total:
         f = n_both / total
 
         def _eq(t):
             return 2.0 * np.arccos(t) - 2.0 * t * np.sqrt(max(1.0 - t * t, 0.0)) - f * np.pi
 
         t_sol = brentq(_eq, 1e-9, 1.0 - 1e-9)
+    elif total > 0 and n_both >= total:
+        # Every gene is significant in both: circles fully concentric (d = 0).
+        # brentq can't be used here — at f = 1 the bracket collapses onto the root.
+        t_sol = 0.0
     else:
         t_sol = 1.0  # circles just touching: d = 2r
 

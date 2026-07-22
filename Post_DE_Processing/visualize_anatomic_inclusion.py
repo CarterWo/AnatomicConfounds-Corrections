@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-visualize_model_comparison.py
-=============================
+visualize_anatomic_inclusion.py
+===============================
 Region-Blind vs Region-Aware DREAM LMM — Focused Difference Visualizations
 
-  BLIND : data/blind/Jan_26BASE_WHOLE_dream_blind.csv
-  AWARE : data/aware/Jan_26BASE_WHOLE_dream_quint.csv
+Reads the selected framework's baseline DE results from
+<lmm_results_dir>/base/{Local_Regional_Analysis,Global_CT_Analysis}/, e.g.
+  BLIND : .../Local_Regional_Analysis/BASE_WHOLE_dream_blind.csv
+  AWARE : .../Global_CT_Analysis/BASE_WHOLE_dream_quint.csv
 
-Produces 5 focused figures saved to ./figures/
+Produces the focused difference figures under
+figures/<framework>/anatomic/<comparison>/.
 """
 
 import os, sys, warnings, textwrap
@@ -21,10 +24,13 @@ import matplotlib.gridspec as gridspec
 from scipy import stats
 from scipy.stats import gaussian_kde
 from adjustText import adjust_text
-from plot_utils import draw_proportional_venn
+from plot_utils import draw_proportional_venn, resolve_results_root
 warnings.filterwarnings("ignore")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Resolve the framework once (in the parent); children inherit it via env below.
+FRAMEWORK, RESULTS_ROOT = resolve_results_root()
 
 # ── Multi-comparison dispatcher ────────────────────────────────────────────────
 # When invoked directly (no COMPARISON_OVERRIDE set), re-exec this script once
@@ -38,15 +44,11 @@ if __name__ == "__main__" and "COMPARISON_OVERRIDE" not in os.environ:
         print(f"\n{'=' * 80}\n  Running comparison: {_comp}\n{'=' * 80}")
         env = os.environ.copy()
         env["COMPARISON_OVERRIDE"] = _comp
+        env["PIPELINE_FRAMEWORK"] = FRAMEWORK   # pin the framework for the child
         ret = subprocess.run([sys.executable, __file__], env=env)
         if ret.returncode != 0:
             sys.exit(ret.returncode)
     sys.exit(0)
-
-# ── Data-source switch ─────────────────────────────────────────────────────────
-# True  → use data_no_O/ (OB-excluded cohort; single-file format, no UP/DOWN split)
-# False → use data/      (original cohort; blind/ and aware/ subdirs)
-USE_NO_O_DATA = True
 
 # ── Comparison selection ───────────────────────────────────────────────────────
 # "blind_vs_quint"  : region-blind  vs quint atlas-aware
@@ -61,27 +63,24 @@ _LABEL_MAP = {
 }
 G1_LABEL, G2_LABEL = _LABEL_MAP[COMPARISON]
 
-if USE_NO_O_DATA:
-    _NO_O_DIR    = os.path.join(SCRIPT_DIR, "data_no_O")
-    _NO_O_GLOBAL = os.path.join(_NO_O_DIR, "Global_CT_Analysis")
-    _NO_O_LOCAL  = os.path.join(_NO_O_DIR, "Local_Regional_Analysis")
+# Baseline DE results for the selected framework. DE_Base_Analysis writes
+# BASE_WHOLE_dream_{blind,napari,quint}.csv under
+# <lmm_results_dir>/base/{Local_Regional_Analysis,Global_CT_Analysis};
+# base/ is already OB-excluded (formerly the data_no_O/ cohort).
+_BASE     = os.path.join(str(RESULTS_ROOT), "base")
+_GLOBAL   = os.path.join(_BASE, "Global_CT_Analysis")
+_LOCAL    = os.path.join(_BASE, "Local_Regional_Analysis")
+_BLIND_F  = os.path.join(_LOCAL,  "BASE_WHOLE_dream_blind.csv")
+_NAPARI_F = os.path.join(_GLOBAL, "BASE_WHOLE_dream_napari.csv")
+_QUINT_F  = os.path.join(_GLOBAL, "BASE_WHOLE_dream_quint.csv")
 
-    if COMPARISON == "blind_vs_quint":
-        BLIND_CSV = os.path.join(_NO_O_LOCAL,  "Jan_26BASE_WHOLE_dream_blind.csv")
-        AWARE_CSV = os.path.join(_NO_O_GLOBAL, "Jan_26BASE_WHOLE_dream_quint.csv")
-        OUTDIR    = os.path.join(SCRIPT_DIR, "S&Du_(search)", "anatomic", "blind_vs_quint")
-    elif COMPARISON == "blind_vs_napari":
-        BLIND_CSV = os.path.join(_NO_O_LOCAL,  "Jan_26BASE_WHOLE_dream_blind.csv")
-        AWARE_CSV = os.path.join(_NO_O_GLOBAL, "Jan_26BASE_WHOLE_dream_napari.csv")
-        OUTDIR    = os.path.join(SCRIPT_DIR, "S&Du_(search)", "anatomic", "blind_vs_napari")
-    elif COMPARISON == "napari_vs_quint":
-        BLIND_CSV = os.path.join(_NO_O_GLOBAL, "Jan_26BASE_WHOLE_dream_napari.csv")
-        AWARE_CSV = os.path.join(_NO_O_GLOBAL, "Jan_26BASE_WHOLE_dream_quint.csv")
-        OUTDIR    = os.path.join(SCRIPT_DIR, "S&Du_(search)", "anatomic", "napari_vs_quint")
-else:
-    BLIND_CSV = os.path.join(SCRIPT_DIR, "data", "blind",  "Jan_26BASE_WHOLE_dream_blind.csv")
-    AWARE_CSV = os.path.join(SCRIPT_DIR, "data", "aware",  "Jan_26BASE_WHOLE_dream_quint.csv")
-    OUTDIR    = os.path.join(SCRIPT_DIR, "S&Du_(search)", "anatomic", f"{COMPARISON}_original")
+if COMPARISON == "blind_vs_quint":
+    BLIND_CSV, AWARE_CSV = _BLIND_F,  _QUINT_F
+elif COMPARISON == "blind_vs_napari":
+    BLIND_CSV, AWARE_CSV = _BLIND_F,  _NAPARI_F
+elif COMPARISON == "napari_vs_quint":
+    BLIND_CSV, AWARE_CSV = _NAPARI_F, _QUINT_F
+OUTDIR = os.path.join(SCRIPT_DIR, "figures", FRAMEWORK, "anatomic", COMPARISON)
 
 os.makedirs(OUTDIR, exist_ok=True)
 
@@ -354,8 +353,8 @@ ax.set_ylim(-0.6, 0.9)
 ax.set_xlabel(f"logFC  [{G1_LABEL}]")
 ax.set_ylabel(f"logFC  [{G2_LABEL}]")
 ax.set_title(f"Effect Size Concordance\n"
-             f"All genes: MAB={abs_bias_all:.3f} (% of |logFC|: {mab_pct_all:.1f}%)\n"
-             f"Top 10%:  MAB={top10_mab_str} (% of |logFC|: {top10_mab_pct_str})",
+             f"All genes: MAB={abs_bias_all:.3f} (Bias ratio: {mab_pct_all:.1f}%)\n"
+             f"Top 10%:  MAB={top10_mab_str} (Bias ratio: {top10_mab_pct_str})",
              fontsize=12)
 ax.legend(markerscale=1.1, fontsize=11.2, framealpha=0.88, loc="upper left")
 
@@ -525,8 +524,8 @@ ax.set_ylim(*ylim_B1)
 ax.set_xlabel(f"Mean logFC  [({G1_LABEL} + {G2_LABEL}) / 2]")
 ax.set_ylabel(f"\u0394 logFC  [{G2_LABEL} \u2212 {G1_LABEL}]\n(negative = {G1_LABEL} has larger effect)")
 ax.set_title(f"Bland-Altman\n"
-             f"All Genes: MAB={abs_bias_all:.3f} (% of |logFC|: {mab_pct_all:.1f}%)\n"
-             f"Top 10%: MAB={top10_mab_str} (% of |logFC|: {top10_mab_pct_str})",
+             f"All Genes: MAB={abs_bias_all:.3f} (Bias ratio: {mab_pct_all:.1f}%)\n"
+             f"Top 10%: MAB={top10_mab_str} (Bias ratio: {top10_mab_pct_str})",
              )
 ax.legend(framealpha=0.9, loc="upper right")
 
@@ -580,7 +579,7 @@ _mab_sig = sig_r["delta_logFC"].abs().mean()
 _avg_mag_sig = ((sig_r["logFC_blind"].abs() + sig_r["logFC_aware"].abs()) / 2).mean()
 _mab_pct_sig = _mab_sig / _avg_mag_sig * 100 if _avg_mag_sig > 0 else np.nan
 ax.set_title(f"{G1_LABEL} vs {G2_LABEL} logFC\n(Significant genes only, n={len(sig_r)})\n"
-             f"MAB={_mab_sig:.3f} (% of |logFC|: {_mab_pct_sig:.1f}%)")
+             f"MAB={_mab_sig:.3f} (Bias ratio: {_mab_pct_sig:.1f}%)")
 
 # Combined legend: sig-cat colors + shape key for model
 _sig_cat_labels = {
@@ -943,57 +942,40 @@ wholebrain_row = {
     "mab_pct_top10":            round(top10_mab_pct, 2) if not np.isnan(top10_mab_pct) else np.nan,
     "cell_type":                "WholeBrain",
     "model":                    "dream",
-    "annotation":               "blind_vs_quint",
+    "annotation":               COMPARISON,
 }
 
 # ── Cell-type-specific blind vs quint stats ───────────────────────────────────
 from pathlib import Path as _Path
 
-if USE_NO_O_DATA:
-    _NO_O_PATH   = _Path(SCRIPT_DIR) / "data_no_O"
-    _GLOBAL_PATH = _NO_O_PATH / "Global_CT_Analysis"
-    _LOCAL_PATH  = _NO_O_PATH / "Local_Regional_Analysis"
+# Per-cell-type baseline files live alongside the whole-brain ones under
+# <lmm_results_dir>/base/, written by DE_Base_Analysis's per-cell-type loop as
+# BASE_<stem>_dream_<annotation>.csv (blind in Local_Regional_Analysis; the
+# region-aware napari/quint in Global_CT_Analysis). Same convention as the
+# whole-brain BASE_WHOLE_* files loaded above.
+_GLOBAL_PATH = _Path(_GLOBAL)
+_LOCAL_PATH  = _Path(_LOCAL)
 
-    # Derive G1/G2 annotation tags from COMPARISON ("blind", "napari", or "quint")
-    _g1_ann, _g2_ann = COMPARISON.split("_vs_")
+# Derive the two annotation tags from COMPARISON ("blind", "napari", or "quint").
+_g1_ann, _g2_ann = COMPARISON.split("_vs_")
 
-    def _ct_file(stem, ann):
-        """Return Path for a CT file given stem and annotation tag."""
-        if ann == "blind":
-            return _LOCAL_PATH  / f"Jan_26BASE_{stem}_dream_blind.csv"
-        return     _GLOBAL_PATH / f"Jan_26BASE_{stem}_dream_{ann}.csv"
+def _ct_file(stem, ann):
+    """Path to a per-cell-type baseline DE file for annotation `ann`."""
+    if ann == "blind":
+        return _LOCAL_PATH  / f"BASE_{stem}_dream_blind.csv"
+    return     _GLOBAL_PATH / f"BASE_{stem}_dream_{ann}.csv"
 
-    _CT_STEMS = {
-        "Astrocytes":    "Astrocytes_Astrocytes",
-        "Microglia":     "Microglia_Microglia",
-        "Astrocytes_CxHp": "Astrocytes.cortex.hippocampus_Astrocytes_cortex_hippocampus",
-    }
-    _CT_PAIRS = {
-        ct: {"blind_single": _ct_file(stem, _g1_ann),
-             "quint_single": _ct_file(stem, _g2_ann)}
-        for ct, stem in _CT_STEMS.items()
-    }
-    _USE_SINGLE_FILES = True
-else:
-    _LMM_BASE  = _Path(SCRIPT_DIR).parent / "LMM_extract" / "Seurat_&_Dream_updated_2_5"
-    _DATA_PATH  = _LMM_BASE / "Global_CT_Analysis"
-    _LOCAL_PATH = _LMM_BASE / "Local_Regional_Analysis"
-
-    _CT_PAIRS = {
-        "Astrocytes": {
-            "blind_up":   _LOCAL_PATH / "Jan_26UP_Astrocytes_dream_blind.csv",
-            "blind_down": _LOCAL_PATH / "Jan_26DOWN_Astrocytes_dream_blind.csv",
-            "quint_up":   _DATA_PATH  / "Jan_26UP_Astrocytes_dream_quint.csv",
-            "quint_down": _DATA_PATH  / "Jan_26DOWN_Astrocytes_dream_quint.csv",
-        },
-        "Microglia": {
-            "blind_up":   _LOCAL_PATH / "Jan_26UP_Microglia_dream_blind.csv",
-            "blind_down": _LOCAL_PATH / "Jan_26DOWN_Microglia_dream_blind.csv",
-            "quint_up":   _DATA_PATH  / "Jan_26UP_Microglia_dream_quint.csv",
-            "quint_down": _DATA_PATH  / "Jan_26DOWN_Microglia_dream_quint.csv",
-        },
-    }
-    _USE_SINGLE_FILES = False
+_CT_STEMS = {
+    "Astrocytes":      "Astrocytes_Astrocytes",
+    "Microglia":       "Microglia_Microglia",
+    "Astrocytes_CxHp": "Astrocytes.cortex.hippocampus_Astrocytes_cortex_hippocampus",
+}
+_CT_PAIRS = {
+    ct: {"blind_single": _ct_file(stem, _g1_ann),
+         "quint_single": _ct_file(stem, _g2_ann)}
+    for ct, stem in _CT_STEMS.items()
+}
+_USE_SINGLE_FILES = True
 
 
 def _long_path(p):
@@ -1101,11 +1083,11 @@ def _compute_bvq_stats(blind_raw, quint_raw):
         "mab_pct_all":              round(mp_all, 2) if not np.isnan(mp_all) else np.nan,
         "mab_pct_top10":            round(mp_t10, 2) if not np.isnan(mp_t10) else np.nan,
         "model":                    "dream",
-        "annotation":               "blind_vs_quint",
+        "annotation":               COMPARISON,
     }
 
 
-print("\nComputing cell-type-specific blind vs quint stats…")
+print(f"\nComputing cell-type-specific {G1_LABEL} vs {G2_LABEL} stats…")
 ct_summary_rows = []
 for _ct, _paths in _CT_PAIRS.items():
     try:

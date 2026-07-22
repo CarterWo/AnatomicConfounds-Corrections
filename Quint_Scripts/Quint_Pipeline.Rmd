@@ -25,7 +25,57 @@ find_config <- function(name = "config.yaml", start = getwd()) {
     d <- parent
   }
 }
-cfg_paths <- yaml::read_yaml(find_config())
+cfg_path <- find_config()
+cfg_all <- yaml::read_yaml(cfg_path)
+
+# config.yaml paths are RELATIVE to the config's directory (the repo root). We
+# resolve them to absolute paths below so the pipeline runs from any working
+# directory. (RStudio evaluates each .Rmd chunk from the document's folder,
+# Quint_Scripts/, which would otherwise break csvs/<fw>/... reads.)
+CONFIG_DIR <- dirname(cfg_path)
+
+# This pipeline runs over two frameworks (datasets): "genotype" and "fmt". Pick
+# which one to process here. `cfg_paths` is then that framework's block, so the
+# cfg_paths$inputs / $outputs / $intermediate references below stay unchanged.
+FRAMEWORK <- "fmt"   # e.g. "genotype" or "fmt"; "" -> DE_FRAMEWORK env / active_framework
+if (!is.null(cfg_all$frameworks)) {
+  fw_name <- if (nzchar(FRAMEWORK)) FRAMEWORK else
+             if (nzchar(Sys.getenv("DE_FRAMEWORK"))) Sys.getenv("DE_FRAMEWORK") else
+             cfg_all$active_framework
+  if (is.null(cfg_all$frameworks[[fw_name]]))
+    stop(sprintf("Framework '%s' not in config. Available: %s",
+                 fw_name, paste(names(cfg_all$frameworks), collapse = ", ")))
+  message("Framework: ", fw_name)
+  cfg_paths <- cfg_all$frameworks[[fw_name]]
+} else {
+  fw_name <- "(flat config)"
+  cfg_paths <- cfg_all   # flat/legacy config
+}
+
+# Resolve this framework's relative paths to absolute (against the config dir) so
+# every read/write below works regardless of the working directory or IDE — no
+# per-user "evaluate chunks in directory" setting required.
+abspath <- function(p) if (grepl("^([A-Za-z]:|/)", p)) p else file.path(CONFIG_DIR, p)
+
+# A missing key yields NULL, and `cfg$a$b <- NULL` is a silent no-op in R, so an
+# absent/misplaced path would otherwise travel on and surface much later as an
+# opaque "invalid 'path' argument" from dir.create()/list.files().
+need <- function(section, key) {
+  p <- cfg_paths[[section]][[key]]
+  if (is.null(p) || !nzchar(p))
+    stop(sprintf("config.yaml: frameworks$%s$%s$%s is missing or empty.", fw_name, section, key))
+  abspath(p)
+}
+
+cfg_paths$outputs$quint_export_dir    <- need("outputs", "quint_export_dir")
+cfg_paths$inputs$quint_color_key_xlsm <- need("inputs", "quint_color_key_xlsm")
+cfg_paths$inputs$quint_labels_csv     <- need("inputs", "quint_labels_csv")
+
+# Two distinct directories: the pre-QUINT images this script WRITES for QuickNII,
+# and the atlas-coloured images QUINT hands back, which it READS. Under fmt these
+# are different folders; under genotype they happen to be the same one.
+cfg_paths$intermediate$quint_images_dir       <- need("intermediate", "quint_images_dir")
+cfg_paths$intermediate$quint_atlas_images_dir <- need("intermediate", "quint_atlas_images_dir")
 ```
 
 
@@ -104,8 +154,8 @@ seurat_obj<-build_seurat_from_folder(cfg_file)
 ```{r}
 
 
-cluster_name<-'call_type_column'
-sample_vec <- unique(seurat_obj$sample_ID)
+cluster_name<-'cell_type'
+sample_vec <- c("120L",  "323DY", "217R", "215L",  "367R", "368R" )
 out_dir <- cfg_paths$intermediate$quint_images_dir
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 for (i in seq_along(sample_vec)) {
@@ -219,8 +269,18 @@ sample_vec <- unique(seurat_obj$sample_ID)#may require customization to match or
 color_codes <- list()
 plots <- list()
 for (i in seq_along(sample_vec)){
-  fp <- file.path(cfg_paths$intermediate$quint_images_dir, paste0("segmentation_cells_",sample_vec[[i]],"_s00",i,".png"))
-  #fp <- paste0("/path/to/quint_images/Output/Images/Probiotics_segmentation_cells_",sample_vec[[i]],"_s00",i,".png")
+  # Locate this sample's atlas PNG by name. The trailing _s00N section index was
+  # assigned by QUINT in a prior run, so it will NOT match this session's loop
+  # position (i) — match on the sample name and ignore the number.
+  qdir <- cfg_paths$intermediate$quint_atlas_images_dir
+  hits <- list.files(qdir, pattern = "\\.png$")
+  hits <- hits[grepl(paste0("segmentation_cells_", sample_vec[[i]], "_s"), hits, fixed = TRUE)]
+  if (length(hits) != 1) {
+    message("  !! expected exactly one atlas PNG for '", sample_vec[[i]], "', found ",
+            length(hits), " — skipping")
+    next
+  }
+  fp <- file.path(qdir, hits[[1]])
   message(fp)
   message(sample_vec[[i]])
   atlas_img <- load.image(fp)
@@ -326,6 +386,40 @@ rownames(all_new_metadata) <- sub("^[^.]*\\.", "", rownames(all_new_metadata))
 
 seurat_obj <- AddMetaData(seurat_obj, metadata = all_new_metadata)
 ```
+#Annotating Regions
+```{r}
+
+
+# ==============================================================================
+# Map your pixel colors (df_plot_pixels$atlas_color) to region names
+# ==============================================================================
+
+
+labels_path <- cfg_paths$inputs$quint_color_key_xlsm
+
+labels <- read_excel(
+  labels_path, sheet=1
+)
+
+colnames(labels) <- c("R", "G", "B", "macro", "LABEL")
+
+labels$rgb_key <- paste(labels$R, labels$G, labels$B, sep = ",")
+
+# Make a lookup vector: names = rgb_key, values = LABEL
+lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
+
+# A) Exact lookup using the rgb_key
+
+seurat_obj@meta.data <- seurat_obj@meta.data %>%
+  mutate(quint_region = if_else(
+    # Condition: Is the current value found in our lookup names?
+    quint_region %in% names(lut_rgb), 
+    # If TRUE: Use the lookup value
+    lut_rgb[quint_region],            
+    # If FALSE: Keep the original value
+    quint_region                      
+  ))
+```
 
 ```{r}
 # Region names that *are* known from the atlas
@@ -378,70 +472,10 @@ plots_unmatched[[8]]
 plots_unmatched[[9]]
 
 ```
-
 ```{r}
-
-named_labels <- unique(as.character(lut_rgb))
-
-sample_ids <- sort(unique(seurat_obj$sample_ID))
-
-plots_matched <- vector("list", length(sample_ids))
-names(plots_matched) <- sample_ids
-
-for (i in seq_along(sample_ids)) {
-  s <- sample_ids[i]
-
-  df <- seurat_obj@meta.data %>%
-    dplyr::filter(sample_ID == s) %>%
-    dplyr::select(x, y, quint_region)
-
-  # TRUE = this cell's quint_region *does* match an atlas label
-  df$is_matched <- df$quint_region %in% named_labels
-
-  p <- ggplot(df, aes(x = x, y = y)) +
-    # unmatched regions: grey, no legend
-    geom_point(
-      data  = df[!df$is_matched, , drop = FALSE],
-      color = "grey80",
-      size  = 0.25,
-      alpha = 0.25
-    ) +
-    # matched regions: colored, with legend
-    geom_point(
-      data = df[df$is_matched, , drop = FALSE],
-      aes(color = quint_region),
-      size  = 0.4,
-      alpha = 0.9
-    ) +
-    scale_color_discrete(name = paste0("Matched regions: ", s)) +
-    guides(color = guide_legend(override.aes = list(size = 2.5))) +
-    coord_equal() +
-    ggtitle(paste0("Matched atlas entries – ", s)) +
-    theme_void() +
-    theme(
-      plot.background  = element_rect(fill = "black", color = NA),
-      panel.background = element_rect(fill = "black", color = NA),
-      legend.position  = "none", #Point of legend
-      legend.key.size  = ,unit(1.0, "lines"),
-      plot.title       = element_text(colour = "white")
-    )
-
-  plots_matched[[i]] <- p
-}
-
-# Example: display samples
-plots_matched[[1]]
-plots_matched[[2]]
-plots_matched[[3]]
-plots_matched[[4]]
-plots_matched[[5]]
-plots_matched[[6]]
-plots_matched[[7]]
-plots_matched[[8]]
-plots_matched[[9]]
-# or e.g.: plots_matched[["368R"]]
-
+sample_ids
 ```
+
 
 #Region Freq.
 ```{r}
@@ -462,64 +496,17 @@ frequency_table <- frequency_table[, c(ncol(frequency_table), 1:(ncol(frequency_
 print(frequency_table)
 ```
 
-```{r}
 
-# Cntrl Ahift M %>% 
-# Alt + - <- 
-labels_path <- cfg_paths$inputs$quint_color_key_xlsm
-
-labels <- read_excel(
-  labels_path, sheet=1
-
-)
-
-colnames(labels) <- c("R", "G", "B", "macro", "LABEL")
-
-labels$rgb_key <- paste(labels$R, labels$G, labels$B, sep = ",")
-
-# Make a lookup vector: names = rgb_key, values = LABEL
-lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
-```
-
-#Annotating Regions
-```{r}
-
-
-# ==============================================================================
-# Map your pixel colors (df_plot_pixels$atlas_color) to region names
-# ==============================================================================
-
-
-labels_path <- cfg_paths$inputs$quint_color_key_xlsm
-
-labels <- read_excel(
-  labels_path, sheet=1
-)
-
-colnames(labels) <- c("R", "G", "B", "macro", "LABEL")
-
-labels$rgb_key <- paste(labels$R, labels$G, labels$B, sep = ",")
-
-# Make a lookup vector: names = rgb_key, values = LABEL
-lut_rgb <- setNames(labels$LABEL, labels$rgb_key)
-
-# A) Exact lookup using the rgb_key
-
-seurat_obj@meta.data <- seurat_obj@meta.data %>%
-  mutate(quint_region = if_else(
-    # Condition: Is the current value found in our lookup names?
-    quint_region %in% names(lut_rgb), 
-    # If TRUE: Use the lookup value
-    lut_rgb[quint_region],            
-    # If FALSE: Keep the original value
-    quint_region                      
-  ))
-```
 #Exporting to CSV
 ```{r}
+# write.csv(
+#   data.frame(quint_region = seurat_obj$quint_region),
+#   file = cfg_paths$inputs$quint_labels_csv,
+#   row.names = TRUE
+# )
 write.csv(
   data.frame(quint_region = seurat_obj$quint_region),
-  file = cfg_paths$inputs$quint_labels_csv,
+  file = "C:/Users/woods/OneDrive - University of Missouri/General - Lin Brain Lab - Ogrp/Iscience_Manuscript/AnatomicConfounds-Corrections/Quint_Scripts/QUINT_atlas_maps/fmt/QUINT_labels.csv",
   row.names = TRUE
 )
 ```

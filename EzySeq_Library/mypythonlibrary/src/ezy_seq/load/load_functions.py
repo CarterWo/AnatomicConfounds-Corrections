@@ -111,21 +111,33 @@ def cosmx(export_dir: str | os.PathLike, expect_weird_fov: bool = True) -> list[
                 # Assuming decompress_targz is defined elsewhere in your code
                 decompress_targz(csv_folder_dir / csv_file, csv_folder_dir)
 
-        # 2) Build expected filenames
-        counts = csv_folder_dir / f"{name}_exprMat_file.csv"
-        fovs   = csv_folder_dir / f"{name}_fov_positions_file.csv"
-        fovs_adj = csv_folder_dir / f"{name}_fov_positions_file_adj.csv"
-        meta   = csv_folder_dir / f"{name}_metadata_file.csv"
+        # 2) Locate the CosMx CSVs by their trailing name, tolerating any leading
+        #    prefix on the file (e.g. a GEO accession like "GSM9661872_"). We match
+        #    "*_exprMat_file.csv" etc. instead of building "{name}_..." from the
+        #    folder name, so prefixed exports load without renaming.
+        def _find_by_suffix(folder, suffix):
+            hits = sorted(p for p in folder.glob(f"*{suffix}")
+                          if not p.name.endswith("_adj.csv"))  # skip our helper file
+            return hits[0] if hits else None
+
+        counts = _find_by_suffix(csv_folder_dir, "_exprMat_file.csv")
+        fovs   = _find_by_suffix(csv_folder_dir, "_fov_positions_file.csv")
+        meta   = _find_by_suffix(csv_folder_dir, "_metadata_file.csv")
 
         # 3) Validate existence
         missing_files = False
-        for file_path in [counts, fovs, meta]:
-             if not file_path.exists():
-                print(f"[error] Missing expected file: {file_path.name}")
+        for label, file_path in [("_exprMat_file.csv", counts),
+                                 ("_fov_positions_file.csv", fovs),
+                                 ("_metadata_file.csv", meta)]:
+            if file_path is None:
+                print(f"[error] Missing expected file: *{label} in {name}")
                 missing_files = True
-        
+
         if missing_files:
             continue
+
+        # Adjusted-FOV path derived from the real FOV filename (preserves prefix).
+        fovs_adj = fovs.with_name(fovs.stem + "_adj.csv")
 
         # 4) Normalize FOV column name
         # We write to a temp file so we don't rely on 'expect_weird_fov' arg logic alone,

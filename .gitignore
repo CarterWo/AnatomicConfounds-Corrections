@@ -20,3 +20,16 @@ dist/
 *.h5ad
 *.h5
 *.hdf5
+
+# Large derived / raw data — regenerable, kept out of git
+LMM_output/
+csvs/
+Final_Data/
+# Large uncompressed CosMx exports (the small .csv.gz polygon defs are kept)
+CosMx polygons.csv
+CosMx cells.csv
+
+# Editor / session temp
+.Rhistory
+.RDataTmp
+*.bak

@@ -1,0 +1,19 @@
+Model,Cell Type,"n-sig
+(G1)","n-sig
+(G2)","n-sig
+(Both)","-log10(p) r
+(All)","-log10(p) r
+(Top %10)","MAB
+(All)","MAB
+(Top %10)","% of logFC
+(All)","% of logFC
+(Top %10)"
+Logistic Regression (Seurat) — Region-Blind,Astrocytes,13,10,18,0.7298,0.8789,0.064,0.0786,34.64,15.99
+Logistic Regression (Seurat) — Region-Aware (Napari),Astrocytes,11,9,18,0.9609,0.983,0.064,0.0786,34.64,15.99
+Logistic Regression (Seurat) — Region-Aware (QuInt),Astrocytes,11,8,18,0.9491,0.9821,0.064,0.0786,34.64,15.99
+Logistic Regression (Seurat) — Region-Blind,Microglia,10,6,7,0.6394,0.6603,0.1026,0.1318,55.43,27.77
+Logistic Regression (Seurat) — Region-Aware (Napari),Microglia,1,5,7,0.8784,0.8733,0.1026,0.1318,55.43,27.77
+Logistic Regression (Seurat) — Region-Aware (QuInt),Microglia,2,5,7,0.8969,0.9326,0.1026,0.1318,55.43,27.77
+Logistic Regression (Seurat) — Region-Blind,WholeBrain,13,12,10,0.5891,0.5821,0.1132,0.1362,69.02,32.0
+Logistic Regression (Seurat) — Region-Aware (Napari),WholeBrain,12,12,11,0.9973,0.9985,0.1132,0.1362,69.02,32.0
+Logistic Regression (Seurat) — Region-Aware (QuInt),WholeBrain,12,12,11,0.9868,0.9933,0.1132,0.1362,69.02,32.0

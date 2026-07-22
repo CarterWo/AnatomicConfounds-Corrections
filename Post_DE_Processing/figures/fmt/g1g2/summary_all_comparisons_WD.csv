@@ -1,0 +1,7 @@
+n_genes,n_sig_G1_only,n_sig_G2_only,n_sig_both,n_flip,pct_flip,pearson_r_all,mab_all,pearson_r_top10,mab_top10,spearman_r_neglogp,spearman_r_neglogp_top10,spearman_r_lfc,mab_pct_all,mab_pct_top10,cell_type,model,annotation
+1000,8,6,14,83,8.3,0.9465,0.0573,0.9848,0.0552,0.8312,0.6636,0.9408,27.0,9.34,Astrocytes,deseq2,pb
+1000,6,6,7,119,11.9,0.9022,0.064,0.9452,0.0786,0.8357,0.8812,0.9069,34.64,15.99,Astrocytes,wilcoxon,blind
+1000,8,5,3,141,14.1,0.8832,0.0937,0.9447,0.1247,0.733,0.425,0.883,43.21,21.38,Microglia,deseq2,pb
+1000,12,14,10,167,16.7,0.8206,0.1026,0.9199,0.1318,0.7536,0.8956,0.8266,55.43,27.77,Microglia,wilcoxon,blind
+1000,18,9,9,177,17.7,0.8355,0.1078,0.9236,0.1313,0.5824,0.6118,0.8149,55.22,24.25,WholeBrain,deseq2,pb
+1000,12,14,8,215,21.5,0.7412,0.1132,0.8844,0.1362,0.6196,0.8094,0.7442,69.02,32.0,WholeBrain,wilcoxon,blind

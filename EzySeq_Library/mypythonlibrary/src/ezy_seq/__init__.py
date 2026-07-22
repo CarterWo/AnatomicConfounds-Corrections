@@ -2,6 +2,7 @@ from .ezyfunctions import (
     rank_DE, apply_annotation, find_elbow_n_genes, filter_and_normalize,
     pseudobulk_export, ensure_is_list_of_adatas, combine_adatas, read_dictionary,
     impact_metrics, set_region_abundance_by_FMT, tag_region_abundance_by_FMT,
+    fix_stray_pixels,
 )
 import importlib as _importlib
 
@@ -13,6 +14,7 @@ __all__ = [
     "rank_DE", "apply_annotation", "find_elbow_n_genes", "filter_and_normalize",
     "pseudobulk_export", "ensure_is_list_of_adatas", "combine_adatas", "read_dictionary",
     "impact_metrics", "set_region_abundance_by_FMT", "tag_region_abundance_by_FMT",
+    "fix_stray_pixels",
     "load", "plot", "lmm",
 ]
 __version__ = "0.1.0"

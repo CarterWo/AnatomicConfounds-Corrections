@@ -1,0 +1,72 @@
+[
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":1,"count":0,"r":255,"g":0,"b":0,"name":"Cortex","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":2,"count":0,"r":255,"g":0,"b":255,"name":"Fibretracts","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":3,"count":0,"r":255,"g":255,"b":0,"name":"Hippo","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":4,"count":0,"r":0,"g":0,"b":255,"name":"Olfactory","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":5,"count":0,"r":0,"g":255,"b":0,"name":"Hypothalamus","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":6,"count":0,"r":0,"g":0,"b":0,"name":"Striatum_Pallidum","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":7,"count":0,"r":255,"g":172,"b":253,"name":"Mid_Hind_Medulla","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":8,"count":0,"r":254,"g":143,"b":66,"name":"Thalamus","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":9,"count":0,"r":127,"g":32,"b":255,"name":"Cerebellum","triplets":[]},
+{
+"metadata" : {
+	"atlas:" : "Allen Mouse Brain Atlas CCFv3 (2015)",
+	"area_type:" : "area",
+	"nutil_version:" : "v1.0.11"
+},
+"idx":10,"count":0,"r":152,"g":251,"b":152,"name":"VentricularSystems","triplets":[]}
+]

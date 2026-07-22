@@ -36,11 +36,17 @@ AB_Y_SMALL_CTS = {"Astrocytes", "Microglia"}
 # ── Paths ────────────────────────────────────────────────────────────────────
 SCRIPT_DIR  = Path(os.path.dirname(os.path.abspath(__file__)))
 PARENT_DIR  = SCRIPT_DIR.parent                     # …/Manuscript
-LMM_BASE    = PARENT_DIR / "LMM_extract"/"Seurat_&_Dream_updated_2_5"
+from plot_utils import resolve_results_root
+FRAMEWORK, RESULTS_ROOT = resolve_results_root()
+# G1/G2 (composition-engineered) results live per deviation magnitude. Default to
+# the aggregated dev_1 folder; override via the LMM_SUBPATH env var
+# (e.g. "aggregated/dev_0.5", or a raw per-seed "dev_1/seed_0").
+LMM_SUBPATH = os.environ.get("LMM_SUBPATH", "aggregated/dev_1")
+LMM_BASE    = RESULTS_ROOT / LMM_SUBPATH
 DATA_PATH   = LMM_BASE / "Global_CT_Analysis"
 LOCAL_PATH  = LMM_BASE / "Local_Regional_Analysis"
 PB_PATH     = LMM_BASE / "Pseudobulk_Validation"
-OUT_BASE    = SCRIPT_DIR / "S&Du_(search)" / "g1g2"
+OUT_BASE    = SCRIPT_DIR / "figures" / FRAMEWORK / "g1g2"
 
 # ── Target Filters ───────────────────────────────────────────────────────────
 # Define which models and cell types to process.
@@ -66,11 +72,11 @@ SIG = 0.05
 # ── Style ────────────────────────────────────────────────────────────────────
 plt.rcParams.update({
     "font.family":       "DejaVu Sans",
-    "font.size":         15,
-    "axes.titlesize":    17,
+    "font.size":         12,
+    "axes.titlesize":    13.6,
     "axes.titleweight":  "bold",
-    "axes.labelsize":    15,
-    "legend.fontsize":   13,
+    "axes.labelsize":    12,
+    "legend.fontsize":   10.4,
     "figure.dpi":        150,
     "axes.spines.top":   False,
     "axes.spines.right": False,
@@ -205,7 +211,7 @@ def _save_venn_genes(outdir, prefix, gene_sets):
             os.path.join(venn_dir, f"{prefix}_{label}.csv"), index=False)
 
 
-def label_all(ax, sub, xcol, ycol, gene_col="Gene", fontsize=13, col="#222"):
+def label_all(ax, sub, xcol, ycol, gene_col="Gene", fontsize=10.4, col="#222"):
     """Return text objects for all rows in sub-dataframe for adjustText."""
     texts = []
     for _, row in sub.iterrows():
@@ -216,7 +222,7 @@ def label_all(ax, sub, xcol, ycol, gene_col="Gene", fontsize=13, col="#222"):
     return texts
 
 
-def label_genes(ax, xs, ys, genes, n=10, criterion=None, fontsize=13, color="#222"):
+def label_genes(ax, xs, ys, genes, n=10, criterion=None, fontsize=10.4, color="#222"):
     """Return text objects for top n genes by |criterion| for adjustText."""
     if criterion is None:
         criterion = pd.Series(np.ones(len(xs)), index=xs.index)
@@ -373,17 +379,17 @@ def _plot_figAB_combined(df, outdir, filename, ba_ylim=None, ba_xlim=None,
     ax.axhline(lo_ba, color="firebrick", lw=1.2, ls="--")
     ax.axhline(0, color="#555", lw=0.8, ls=":", alpha=0.7)
     ax.annotate("G1 > G2", xy=(xlim_BA[1] * 0.55, lo_ba * 0.6),
-                fontsize=11, color=C["g1"], style="italic")
+                fontsize=8.8, color=C["g1"], style="italic")
     ax.annotate("G2 > G1", xy=(xlim_BA[1] * 0.55, hi_ba * 0.55),
-                fontsize=11, color=C["g2"], style="italic")
+                fontsize=8.8, color=C["g2"], style="italic")
     ax.set_xlim(*xlim_BA); ax.set_ylim(*ylim_BA)
     ax.set_xlabel("Mean logFC  [(G1 + G2) / 2]")
     ax.set_ylabel("\u0394 logFC  [G2 \u2212 G1]\n(positive = G2 has larger effect)")
     ax.set_title(f"Bland-Altman\n"
-                 f"All Genes: MAB={abs_bias_all:.3f} (% of |logFC|: {mab_pct_all:.1f}%)\n"
-                 f"Top 10%: MAB={top10_mab_str} (% of |logFC|: {top10_mab_pct_str})",
-                 fontsize=14)
-    ax.legend(fontsize=10.5, framealpha=0.9, loc="upper right")
+                 f"All Genes: MAB={abs_bias_all:.3f} (Bias ratio: {mab_pct_all:.1f}%)\n"
+                 f"Top 10%: MAB={top10_mab_str} (Bias ratio: {top10_mab_pct_str})",
+                 fontsize=11.2)
+    ax.legend(fontsize=8.4, framealpha=0.9, loc="upper right")
     texts_BA = []
     sub_BA_top25 = df[colored_mask_BA & df["Gene"].isin(top25_genes)].copy()
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
@@ -413,13 +419,13 @@ def _plot_figAB_combined(df, outdir, filename, ba_ylim=None, ba_xlim=None,
                    color=col, s=55, marker="o", zorder=4, edgecolors="none")
     ax.axvline(0, color="black", lw=1.0, ls="--", alpha=0.6)
     ax.set_yticks(ys_db)
-    ax.set_yticklabels(sig_r["Gene"].values, fontsize=11, fontweight="bold")
+    ax.set_yticklabels(sig_r["Gene"].values, fontsize=8.8, fontweight="bold")
     ax.set_xlabel("logFC")
     _mab = sig_r["delta_logFC"].abs().mean()
     _avg_mag = ((sig_r["logFC_up"].abs() + sig_r["logFC_down"].abs()) / 2).mean()
     _mab_pct = _mab / _avg_mag * 100 if _avg_mag > 0 else np.nan
     ax.set_title(f"G1 vs G2 logFC\n(Significant genes only, n={len(sig_r)})\n"
-                 f"MAB={_mab:.3f} (% of |logFC|: {_mab_pct:.1f}%)", fontsize=14)
+                 f"MAB={_mab:.3f} (Bias ratio: {_mab_pct:.1f}%)", fontsize=11.2)
     leg_sig = [mpatches.Patch(color=sig_col_map[c], label=c)
                for c in ["Sig in Both", "G1 Only", "G2 Only"]
                if (sig_r["sig_cat"] == c).any()]
@@ -428,7 +434,7 @@ def _plot_figAB_combined(df, outdir, filename, ba_ylim=None, ba_xlim=None,
                         markersize=7, label="\u25cb G1"),
                  Line2D([0], [0], marker="o", color="w", markerfacecolor="#555",
                         markersize=7, label="\u25cf G2")]
-    ax.legend(handles=leg_sig + leg_shape, fontsize=10.5, framealpha=0.9)
+    ax.legend(handles=leg_sig + leg_shape, fontsize=8.4, framealpha=0.9)
 
     # Panel 4: -log10(p) scatter
     ax = axes[3]
@@ -458,8 +464,8 @@ def _plot_figAB_combined(df, outdir, filename, ba_ylim=None, ba_xlim=None,
     _r_nla_top10_str = f"{r_nla_sp_top10:.3f}" if not np.isnan(r_nla_sp_top10) else "n/a"
     ax.set_title(f"Significance Concordance\n"
                  f"Spearman r = {r_nla_sp:.3f} (all)  |  {_r_nla_top10_str} (top 10%)",
-                 fontsize=14)
-    ax.legend(markerscale=1.1, fontsize=10.5, framealpha=0.88, loc="upper right")
+                 fontsize=11.2)
+    ax.legend(markerscale=1.1, fontsize=8.4, framealpha=0.88, loc="upper right")
     thresh_nla = 2.3
     texts_nla = []
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
@@ -525,19 +531,19 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
     ax.add_patch(plt.Circle((3.2, 3.5), 2.5, color=C["g1"], alpha=0.35))
     ax.add_patch(plt.Circle((6.8, 3.5), 2.5, color=C["g2"], alpha=0.35))
     ax.text(2.1, 3.5, str(n_g1), ha="center", va="center",
-            fontsize=38, fontweight="bold", color=C["g1"])
+            fontsize=30.4, fontweight="bold", color=C["g1"])
     ax.text(7.9, 3.5, str(n_g2), ha="center", va="center",
-            fontsize=38, fontweight="bold", color=C["g2"])
+            fontsize=30.4, fontweight="bold", color=C["g2"])
     overlap_col = C["both"] if n_ab > 0 else "#888"
     t_overlap = ax.text(5.0, 3.5, str(n_ab), ha="center", va="center",
-                        fontsize=38, fontweight="bold", color=overlap_col)
+                        fontsize=30.4, fontweight="bold", color=overlap_col)
     if n_ab > 0:
         t_overlap.set_path_effects([withStroke(linewidth=3, foreground="white")])
-    ax.text(2.0, 0.6, "G1\n(Stroke Cortex\u2191)", ha="center", fontsize=16,
+    ax.text(2.0, 0.6, "G1\n(Stroke Cortex\u2191)", ha="center", fontsize=12.8,
             fontweight="bold", color=C["g1"])
-    ax.text(8.0, 0.6, "G2\n(Healthy Cortex\u2191)", ha="center", fontsize=16,
+    ax.text(8.0, 0.6, "G2\n(Healthy Cortex\u2191)", ha="center", fontsize=12.8,
             fontweight="bold", color=C["g2"])
-    ax.set_title(f"Significant Genes ({PVAL_DISP_NAME} < {SIG})", fontsize=17, pad=8)
+    ax.set_title(f"Significant Genes ({PVAL_DISP_NAME} < {SIG})", fontsize=13.6, pad=8)
     _save_venn_genes(outdir, "figA_unadj", {
         "G1_Only": df.loc[df["sig_cat"] == "G1 Only",     "Gene"].tolist(),
         "G2_Only": df.loc[df["sig_cat"] == "G2 Only",     "Gene"].tolist(),
@@ -583,10 +589,10 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
     top10_mab_str     = f"{abs_bias_top10:.3f}" if not np.isnan(abs_bias_top10) else "n/a"
     top10_mab_pct_str = f"{mab_pct_top10:.1f}%" if not np.isnan(mab_pct_top10) else "n/a"
     ax.set_title(f"Bland-Altman\n"
-                 f"All Genes: MAB={abs_bias_all:.3f} (% of |logFC|: {mab_pct_all:.1f}%)\n"
-                 f"Top 10%: MAB={top10_mab_str} (% of |logFC|: {top10_mab_pct_str})",
-                 fontsize=14)
-    ax.legend(markerscale=1.1, fontsize=10.5, framealpha=0.88, loc="upper right")
+                 f"All Genes: MAB={abs_bias_all:.3f} (Bias ratio: {mab_pct_all:.1f}%)\n"
+                 f"Top 10%: MAB={top10_mab_str} (Bias ratio: {top10_mab_pct_str})",
+                 fontsize=11.2)
+    ax.legend(markerscale=1.1, fontsize=8.4, framealpha=0.88, loc="upper right")
     texts_A2 = []
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
         sub = df[(df["sig_cat"] == cat) & (df["mean_logFC"].abs() > 0.2)]
@@ -624,8 +630,8 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
     _r_nla_top10_str = f"{r_nla_sp_top10:.3f}" if not np.isnan(r_nla_sp_top10) else "n/a"
     ax.set_title(f"Significance Concordance\n"
                  f"Spearman r = {r_nla_sp:.3f} (all)  |  {_r_nla_top10_str} (top 10%)",
-                 fontsize=14)
-    ax.legend(markerscale=1.1, fontsize=10.5, framealpha=0.88, loc="upper right")
+                 fontsize=11.2)
+    ax.legend(markerscale=1.1, fontsize=8.4, framealpha=0.88, loc="upper right")
     thresh_A3 = 2.3
     texts_A3 = []
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
@@ -667,8 +673,8 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
 
     # ── FIGURE B — Bland-Altman (left) + Dumbbell (right) ───────────────────
     plt.rcParams.update({
-        "font.size": 28, "axes.titlesize": 31, "axes.labelsize": 28,
-        "legend.fontsize": 22, "xtick.labelsize": 25, "ytick.labelsize": 25,
+        "font.size": 22.4, "axes.titlesize": 24.8, "axes.labelsize": 22.4,
+        "legend.fontsize": 17.6, "xtick.labelsize": 20, "ytick.labelsize": 20,
     })
     fig, axes = plt.subplots(1, 2, figsize=(15, 6),
                               gridspec_kw={"width_ratios": [1.1, 1.0]})
@@ -719,26 +725,26 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
     ax.axhline(0, color="#555", lw=0.8, ls=":", alpha=0.7)
 
     ax.annotate("G1 > G2", xy=(x_margin * 0.55, lo_ba * 0.6),
-                fontsize=22, color=C["g1"], style="italic")
+                fontsize=17.6, color=C["g1"], style="italic")
     ax.annotate("G2 > G1", xy=(x_margin * 0.55, hi_ba * 0.55),
-                fontsize=22, color=C["g2"], style="italic")
+                fontsize=17.6, color=C["g2"], style="italic")
 
     ax.set_xlim(*xlim_B1)
     ax.set_ylim(*ylim_B1)
     ax.set_xlabel("Mean logFC  [(G1 + G2) / 2]")
     ax.set_ylabel("\u0394 logFC  [G2 \u2212 G1]\n(positive = G2 has larger effect)")
     ax.set_title(f"Bland-Altman\n"
-                 f"All Genes: MAB={abs_bias_all:.3f} (% of |logFC|: {mab_pct_all:.1f}%)\n"
-                 f"Top 10%: MAB={top10_mab_str} (% of |logFC|: {top10_mab_pct_str})",
-                 fontsize=25)
-    ax.legend(fontsize=22, framealpha=0.9, loc="upper right")
+                 f"All Genes: MAB={abs_bias_all:.3f} (Bias ratio: {mab_pct_all:.1f}%)\n"
+                 f"Top 10%: MAB={top10_mab_str} (Bias ratio: {top10_mab_pct_str})",
+                 fontsize=20)
+    ax.legend(fontsize=17.6, framealpha=0.9, loc="upper right")
 
     texts_B1 = []
     sub_B1_top25 = df[colored_mask_B1 & df["Gene"].isin(top25_genes)].copy()
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]),
                      ("Sig in Both", C["both"])]:
         texts_B1.extend(label_all(ax, sub_B1_top25[sub_B1_top25["sig_cat"] == cat],
-                                   "mean_logFC", "delta_logFC", col=col, fontsize=22))
+                                   "mean_logFC", "delta_logFC", col=col, fontsize=17.6))
     if texts_B1:
         safe_adjust(texts_B1, ax,
                         force_text=(0.3, 1.5), force_static=(0.2, 0.8),
@@ -778,14 +784,14 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
 
     ax.axvline(0, color="black", lw=1.0, ls="--", alpha=0.6)
     ax.set_yticks(ys_db)
-    ax.set_yticklabels(sig_r["Gene"].values, fontsize=24, fontweight="bold")
+    ax.set_yticklabels(sig_r["Gene"].values, fontsize=19.2, fontweight="bold")
     ax.set_xlabel("logFC")
     _mab = sig_r["delta_logFC"].abs().mean()
     _avg_mag = ((sig_r["logFC_up"].abs() + sig_r["logFC_down"].abs()) / 2).mean()
     _mab_pct = _mab / _avg_mag * 100 if _avg_mag > 0 else np.nan
     ax.set_title(f"G1 vs G2 logFC\n(Significant genes only, n={len(sig_r)})\n"
-                 f"MAB={_mab:.3f} (% of |logFC|: {_mab_pct:.1f}%)",
-                 fontsize=25)
+                 f"MAB={_mab:.3f} (Bias ratio: {_mab_pct:.1f}%)",
+                 fontsize=20)
 
     leg_sig = [mpatches.Patch(color=sig_col_map[c], label=c)
                for c in ["Sig in Both", "G1 Only", "G2 Only"]
@@ -795,14 +801,14 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
                         markersize=7, label="\u25cb G1"),
                  Line2D([0], [0], marker="o", color="w", markerfacecolor="#555",
                         markersize=7, label="\u25cf G2")]
-    ax.legend(handles=leg_sig + leg_shape, fontsize=22, framealpha=0.9)
+    ax.legend(handles=leg_sig + leg_shape, fontsize=17.6, framealpha=0.9)
 
     fig.tight_layout()
     fig.savefig(os.path.join(outdir, "figB_effect_size_shift.png"), dpi=160, bbox_inches="tight")
     plt.close(fig)
     plt.rcParams.update({
-        "font.size": 15, "axes.titlesize": 17, "axes.labelsize": 15,
-        "legend.fontsize": 13, "xtick.labelsize": 15, "ytick.labelsize": 15,
+        "font.size": 12, "axes.titlesize": 13.6, "axes.labelsize": 12,
+        "legend.fontsize": 10.4, "xtick.labelsize": 12, "ytick.labelsize": 12,
     })
 
     # ── FIGURES A+B COMBINED — Venn | Bland-Altman | Top-25 Dumbbell | -log10(p) scatter ──
@@ -856,17 +862,17 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
     ax.axhline(lo_ba_AB, color="firebrick", lw=1.2, ls="--")
     ax.axhline(0, color="#555", lw=0.8, ls=":", alpha=0.7)
     ax.annotate("G1 > G2", xy=(x_margin_AB * 0.55, lo_ba_AB * 0.6),
-                fontsize=11, color=C["g1"], style="italic")
+                fontsize=8.8, color=C["g1"], style="italic")
     ax.annotate("G2 > G1", xy=(x_margin_AB * 0.55, hi_ba_AB * 0.55),
-                fontsize=11, color=C["g2"], style="italic")
+                fontsize=8.8, color=C["g2"], style="italic")
     ax.set_xlim(*xlim_AB); ax.set_ylim(*ylim_AB)
     ax.set_xlabel("Mean logFC  [(G1 + G2) / 2]")
     ax.set_ylabel("\u0394 logFC  [G2 \u2212 G1]\n(positive = G2 has larger effect)")
     ax.set_title(f"Bland-Altman\n"
-                 f"All Genes: MAB={abs_bias_all:.3f} (% of |logFC|: {mab_pct_all:.1f}%)\n"
-                 f"Top 10%: MAB={top10_mab_str} (% of |logFC|: {top10_mab_pct_str})",
-                 fontsize=14)
-    ax.legend(fontsize=10.5, framealpha=0.9, loc="upper right")
+                 f"All Genes: MAB={abs_bias_all:.3f} (Bias ratio: {mab_pct_all:.1f}%)\n"
+                 f"Top 10%: MAB={top10_mab_str} (Bias ratio: {top10_mab_pct_str})",
+                 fontsize=11.2)
+    ax.legend(fontsize=8.4, framealpha=0.9, loc="upper right")
     texts_AB_ba = []
     sub_AB_top25 = df[colored_mask_AB & df["Gene"].isin(top25_genes)].copy()
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
@@ -895,14 +901,14 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
                    color=col, s=55, marker="o", zorder=4, edgecolors="none")
     ax.axvline(0, color="black", lw=1.0, ls="--", alpha=0.6)
     ax.set_yticks(ys_db_AB)
-    ax.set_yticklabels(sig_r_AB["Gene"].values, fontsize=11, fontweight="bold")
+    ax.set_yticklabels(sig_r_AB["Gene"].values, fontsize=8.8, fontweight="bold")
     ax.set_xlabel("logFC")
     _mab_AB = sig_r_AB["delta_logFC"].abs().mean()
     _avg_mag_AB = ((sig_r_AB["logFC_up"].abs() + sig_r_AB["logFC_down"].abs()) / 2).mean()
     _mab_pct_AB = _mab_AB / _avg_mag_AB * 100 if _avg_mag_AB > 0 else np.nan
     ax.set_title(f"G1 vs G2 logFC\n(Significant genes only, n={len(sig_r_AB)})\n"
-                 f"MAB={_mab_AB:.3f} (% of |logFC|: {_mab_pct_AB:.1f}%)",
-                 fontsize=14)
+                 f"MAB={_mab_AB:.3f} (Bias ratio: {_mab_pct_AB:.1f}%)",
+                 fontsize=11.2)
     leg_sig_AB = [mpatches.Patch(color=sig_col_map_AB[c], label=c)
                   for c in ["Sig in Both", "G1 Only", "G2 Only"]
                   if (sig_r_AB["sig_cat"] == c).any()]
@@ -911,7 +917,7 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
                            markersize=7, label="\u25cb G1"),
                     Line2D([0], [0], marker="o", color="w", markerfacecolor="#555",
                            markersize=7, label="\u25cf G2")]
-    ax.legend(handles=leg_sig_AB + leg_shape_AB, fontsize=10.5, framealpha=0.9)
+    ax.legend(handles=leg_sig_AB + leg_shape_AB, fontsize=8.4, framealpha=0.9)
 
     # Panel 4: -log10(p) scatter
     ax = axes[3]
@@ -943,8 +949,8 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
     _r_nla_top10_str = f"{r_nla_sp_top10:.3f}" if not np.isnan(r_nla_sp_top10) else "n/a"
     ax.set_title(f"Significance Concordance\n"
                  f"Spearman r = {r_nla_sp:.3f} (all)  |  {_r_nla_top10_str} (top 10%)",
-                 fontsize=14)
-    ax.legend(markerscale=1.1, fontsize=10.5, framealpha=0.88, loc="upper right")
+                 fontsize=11.2)
+    ax.legend(markerscale=1.1, fontsize=8.4, framealpha=0.88, loc="upper right")
     thresh_AB = 2.3
     texts_AB_nla = []
     for cat, col in [("G1 Only", C["g1"]), ("G2 Only", C["g2"]), ("Sig in Both", C["both"])]:
@@ -998,18 +1004,18 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
         top_own = nlp[own_sig].nlargest(min(6, own_sig.sum())).index if own_sig.sum() else []
         for i in top_own:
             texts.append(ax.text(lfc[i], nlp[i], df.loc[i, "Gene"],
-                                 fontsize=13, fontweight="bold", zorder=7))
+                                 fontsize=10.4, fontweight="bold", zorder=7))
         for i in df.index[oo]:
             texts.append(ax.text(lfc[i], nlp[i], df.loc[i, "Gene"],
-                                 fontsize=13, style="italic", color=other_col, zorder=7))
+                                 fontsize=10.4, style="italic", color=other_col, zorder=7))
         if texts:
             safe_adjust(texts, ax, force_text=(0.3, 1.5), force_static=(0.2, 0.8),
                         arrowprops=dict(arrowstyle="-", lw=0.8, color="#888"))
         ax.set_xlim(-xh, xh); ax.set_ylim(0, yt)
         ax.set_xlabel("logFC")
         ax.set_ylabel(f"\u2212log\u2081\u2080({PVAL_DISP_NAME})")
-        ax.set_title(title, fontsize=15)
-        ax.legend(fontsize=11, framealpha=0.9, loc="upper right")
+        ax.set_title(title, fontsize=12)
+        ax.legend(fontsize=8.8, framealpha=0.9, loc="upper right")
 
     _volcano(axes_v[0], "logFC_up", f"{PVAL_BASE_COL}_up",
              df["sig_up"], df["sig_down"], C["g1"], C["g2"],
@@ -1049,11 +1055,11 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
         if not key:
             y_start -= 0.03; continue
         ax1.text(0.02, y_start, key + ":", transform=ax1.transAxes,
-                 fontsize=11, fontweight="bold", va="top")
+                 fontsize=8.8, fontweight="bold", va="top")
         ax1.text(0.55, y_start, val, transform=ax1.transAxes,
-                 fontsize=11, va="top", color="#333")
+                 fontsize=8.8, va="top", color="#333")
         y_start -= 0.06
-    ax1.set_title("Key Metrics", fontsize=14, pad=8)
+    ax1.set_title("Key Metrics", fontsize=11.2, pad=8)
 
     # E2: Correlation bar chart
     ax2 = fig.add_subplot(gs_e[1])
@@ -1065,13 +1071,13 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
                     alpha=0.88, width=0.55)
     for bar, val in zip(bars2, vals_bar):
         ax2.text(bar.get_x() + bar.get_width() / 2, val + 0.01, f"{val:.3f}",
-                 ha="center", fontsize=13, fontweight="bold")
+                 ha="center", fontsize=10.4, fontweight="bold")
     ax2.axhline(0.7, color="#4c956c", lw=1, ls="--", alpha=0.7, label="r=0.70 (good)")
     ax2.axhline(0.5, color="#e9c46a", lw=1, ls="--", alpha=0.7, label="r=0.50 (fair)")
     ax2.set_ylim(0, 1.1)
     ax2.set_ylabel("Correlation (r)")
-    ax2.set_title("G1 vs G2 Concordance\nby Metric", fontsize=14)
-    ax2.legend(fontsize=10.5)
+    ax2.set_title("G1 vs G2 Concordance\nby Metric", fontsize=11.2)
+    ax2.legend(fontsize=8.4)
 
     # E3: Stacked sig-category bar
     ax3 = fig.add_subplot(gs_e[2])
@@ -1084,12 +1090,12 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
                 edgecolor="white", alpha=0.88, label=f"{lab} (n={val})")
         if val > 20:
             ax3.text(0, bottom + val / 2, str(val), ha="center", va="center",
-                     fontsize=14, fontweight="bold", color="white")
+                     fontsize=11.2, fontweight="bold", color="white")
         bottom += val
     ax3.set_xlim(-0.6, 0.6); ax3.set_xticks([])
     ax3.set_ylabel("Number of genes")
-    ax3.set_title(f"Significance Category\n(n={len(df)} shared genes)", fontsize=14)
-    ax3.legend(loc="upper right", fontsize=10.5, framealpha=0.9)
+    ax3.set_title(f"Significance Category\n(n={len(df)} shared genes)", fontsize=11.2)
+    ax3.legend(loc="upper right", fontsize=8.4, framealpha=0.9)
 
     # E4: Direction-consistency pie
     ax4 = fig.add_subplot(gs_e[3])
@@ -1099,7 +1105,7 @@ def make_figures(df, outdir, tag, ba_ylim=None, ba_xlim=None, nla_lim=None, merg
             autopct="%1.1f%%", startangle=90, pctdistance=0.75,
             textprops={"fontsize": 13},
             wedgeprops={"edgecolor": "white", "linewidth": 1.5})
-    ax4.set_title(f"Direction Consistency\n({100*n_flip/len(df):.1f}% flip sign)", fontsize=14)
+    ax4.set_title(f"Direction Consistency\n({100*n_flip/len(df):.1f}% flip sign)", fontsize=11.2)
 
     fig.tight_layout()
     fig.savefig(os.path.join(outdir, "figE_summary_dashboard.png"), dpi=160, bbox_inches="tight")
@@ -1208,7 +1214,7 @@ for ct in sorted(data_by_celltype.keys()):
 # Save summary table
 summary_df = pd.DataFrame(summary_rows)
 OUT_BASE.mkdir(parents=True, exist_ok=True)
-summary_path = str(OUT_BASE / "summary_all_comparisons.csv")
+summary_path = str(OUT_BASE / "summary_all_comparisons_dLMM.csv")
 summary_df.to_csv(summary_path, index=False)
 print(f"\nSummary table saved to: {summary_path}")
 
