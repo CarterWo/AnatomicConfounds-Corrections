@@ -310,6 +310,10 @@ de_output_done <- function(out_path) {
 # so ct_simple == "Astrocytes" still carries two levels and (1|cell_type) would
 # soak up part of the very regional signal this pipeline is built to measure.
 # The ct loops in LMM_all.R / LMM_dev15.R / DE_Base_Analysis.R pass ct_col = NULL.
+#
+# run_de_blind (below) uses the identical ct_col logic, so the blind and
+# region-aware models differ only by the (1|region) term -- this isolates
+# region as the sole distinguishing covariate between the two models.
 run_de_dream <- function(seurat_obj, dataset_name, out_prefix, save_dir,
                          region_col = "napari_region", ct_col = "cell_type") {
   message(paste0("\n>>> [DREAM] STARTING FOR: ", dataset_name))
@@ -353,11 +357,29 @@ run_de_dream <- function(seurat_obj, dataset_name, out_prefix, save_dir,
 }
 
 # run_de_blind: region-blind Dream LMM with per-group expression metrics
-run_de_blind <- function(seurat_obj, dataset_name, out_prefix, save_dir) {
+run_de_blind <- function(seurat_obj, dataset_name, out_prefix, save_dir,
+                         ct_col = "cell_type") {
   message(paste0("\n>>> [DREAM BLIND] STARTING FOR: ", dataset_name))
   out_path <- file.path(save_dir, paste0(out_prefix, ".csv"))
   if (de_output_done(out_path)) return(invisible(NULL))
-  form_de  <- ~ Treatment + log_depth + (1|sample_ID)
+  ct_term <- ""
+  if (is.null(ct_col)) {
+    message("    Cell-type-specific run - no cell-type random effect.")
+  } else if (!ct_col %in% colnames(seurat_obj@meta.data)) {
+    message(paste0("    Missing column ", ct_col, " - no cell-type random effect."))
+  } else {
+    num_cts <- length(unique(seurat_obj@meta.data[[ct_col]]))
+    if (num_cts > 1) {
+      message(paste0("    Detected ", num_cts, " levels in ", ct_col,
+                     ". Including (1|", ct_col, ")."))
+      ct_term <- paste0(" + (1|", ct_col, ")")
+    } else {
+      message(paste0("    Single level in ", ct_col, " - removing (1|", ct_col,
+                     ") from formula."))
+    }
+  }
+  form_de  <- as.formula(paste0("~ Treatment + log_depth", ct_term, " + (1|sample_ID)"))
+  message(paste("    Formula:", deparse(form_de)))
   geneExpr <- as.matrix(GetAssayData(seurat_obj, layer = "data"))
   counts   <- as.matrix(GetAssayData(seurat_obj, layer = "counts"))
   info     <- seurat_obj@meta.data
