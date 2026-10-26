@@ -8,7 +8,8 @@
 #SBATCH --output=logs/var_comp_%A_%a.out
 #SBATCH --error=logs/var_comp_%A_%a.err
 #
-# 0-1: CosMx (olfactory bulb removed), Napari and QUINT labels
+# 0-1: CosMx, olfactory bulb removed before sampling (export_cosmx_for_variance.py),
+#      Napari and QUINT labels
 # 2-3: Zhuang-ABCA MERFISH 20,000-cell subset (no treatment term), Napari- and QUINT-equivalent labels
 
 set -e
@@ -17,12 +18,14 @@ module load gcc/12.3.0
 export LD_LIBRARY_PATH="$(dirname "$(gcc -print-file-name=libstdc++.so.6)"):${LD_LIBRARY_PATH}"
 
 ROOT=~/data/AnatomicalRegions_iScience
-COSMX=$ROOT/real_data/permutation_export
+COSMX=$ROOT/variance_components_r21/cosmx_export
 MERFISH=$ROOT/independent_validation/seurat_input_multi_ezyseq_realct_dev1.0/g1
 SCRIPT=$(pwd)/variance_components.R
-OUT=$ROOT/variance_components
+OUT=$ROOT/variance_components_r21
 mkdir -p "$OUT"
 
+# The CosMx export already excludes the olfactory bulb; passing Olfactory again is a
+# check that should report 0 cells dropped.
 case $SLURM_ARRAY_TASK_ID in
   0) Rscript "$SCRIPT" "$COSMX"   "$OUT/vc_cosmx_napari.csv"   napari_region 1 16 Olfactory ;;
   1) Rscript "$SCRIPT" "$COSMX"   "$OUT/vc_cosmx_quint.csv"    quint_region  1 16 Olfactory ;;

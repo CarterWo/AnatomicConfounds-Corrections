@@ -1,6 +1,6 @@
 """Builds Supplementary Table 3 (variance components) from the per-gene result CSVs.
 
-usage: python3 make_supp_table.py <results_dir> <out.xlsx> <n_cosmx_cells>
+usage: python3 make_supp_table.py <results_dir> <out.xlsx>
 
 The first sheet summarizes each component across genes (median, IQR, 90th percentile,
 mean) as a percentage of total variance; the other sheets list the per-gene values.
@@ -12,7 +12,7 @@ import sys
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-VC_DIR, OUT, N_COSMX = sys.argv[1], sys.argv[2], int(sys.argv[3])
+VC_DIR, OUT = sys.argv[1], sys.argv[2]
 
 SETS = [
     ("CosMx (this study)", "Napari (4 broad regions + unassigned)", "vc_cosmx_napari.csv", "Per-gene CosMx Napari"),
@@ -71,28 +71,21 @@ ws.freeze_panes = "A2"
 
 row += 1
 cap = (
-    "Supplementary Table 3. Estimated variance components for the two real datasets. For each gene, a "
-    "linear mixed model with the covariates of the deployed Dream models (log-scaled unique genes count, "
-    "plus treatment group for CosMx, as fixed effects; cell type, anatomic region, and biological sample as "
-    "random intercepts) was fit to log-normalized expression with lme4 (REML), and the variance attributable "
-    "to each term was expressed as a percentage of the total. Values summarize the per-gene distribution. "
-    f"CosMx: {N_COSMX:,} cells from the six Stroke-FMT and Healthy-FMT samples (8,000 sampled per sample, "
-    "with olfactory bulb cells then removed as in the main analysis; 32 cell types), 1,000 genes. MERFISH "
-    "(Zhuang-ABCA-1-4): the 20,000-cell subsample (5,000 per animal) from four wild-type mice used for the "
-    "1.0x external validation (cell types: excitatory neuron, astrocyte, microglia, other), 1,107 genes "
-    "detected in at least 1% of cells; no treatment term is included because this dataset has no treatment "
-    "contrast. Per-gene estimates are provided in the remaining sheets."
+    "Supplementary Table 3. Estimated variance components for model covariates, summarized "
+    "across genes in the first sheet, with separate per-gene sheets for the CosMx dataset with "
+    "Napari and QUINT labels and for the MERFISH dataset with Napari- and QUINT-equivalent "
+    "labels."
 )
 c = ws.cell(row, 1, cap)
 c.font = Font(name="Calibri", size=9)
 c.alignment = Alignment(wrap_text=True, vertical="top")
 ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
-ws.row_dimensions[row].height = 120
+ws.row_dimensions[row].height = 45
 
 for sheet, rows in per.items():
     s = wb.create_sheet(sheet)
     keys = [k for k, _ in COMPS if k in rows[0]]
-    heads = ["Gene"] + [n + " (%)" for k, n in COMPS if k in rows[0]] + ["Singular fit"]
+    heads = ["Gene"] + [n + " (%)" for k, n in COMPS if k in rows[0]]
     for j, h in enumerate(heads, 1):
         c = s.cell(1, j, h)
         c.font = Font(bold=True)
@@ -102,7 +95,6 @@ for sheet, rows in per.items():
         s.cell(i, 1, r["gene"])
         for j, k in enumerate(keys, 2):
             s.cell(i, j, round(100 * float(r[k]), 3))
-        s.cell(i, len(keys) + 2, r["singular"].upper() == "TRUE")
     s.freeze_panes = "B2"
     s.column_dimensions["A"].width = 16
 wb.save(OUT)
